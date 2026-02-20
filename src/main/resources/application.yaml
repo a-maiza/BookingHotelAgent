@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: bookinghotelagent
+  datasource:
+    url: jdbc:h2:mem:hotel;DB_CLOSE_DELAY=-1
+  jpa:
+    hibernate:
+      ddl-auto: update
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:dummy}
+    password: ${SMTP_PASSWORD:dummy}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+app:
+  openai:
+    api-key: ${OPENAI_API_KEY:dummy}
+    model: gpt-4.1-mini
+
+logging:
+  level:
+    dev.langchain4j: DEBUG
+    dev.langchain4j.model.openai: DEBUG
+    org.springframework.mail: INFO # on rend ça configurable
