@@ -1,7 +1,6 @@
 package com.cirta.bookinghotelagent.api;
 
-import com.cirta.bookinghotelagent.ai.AgentFactory;
-import com.cirta.bookinghotelagent.service.AgentOrchestrator;
+import com.cirta.bookinghotelagent.service.agent.AgentOrchestrator;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;

@@ -27,12 +27,27 @@ public class BookingRequestParser {
     public BookingRequestDraft parse(String userMessage) {
         // System prompt très strict pour extraction
         String system = """
-        Tu es un extracteur de données.
-        Transforme le message utilisateur en un objet JSON correspondant STRICTEMENT au schéma fourni.
-        Règles:
-        - N'invente pas d'informations.
-        - Si une info n'est pas présente, mets la valeur à null.
-        - Réponds uniquement avec du JSON conforme au schéma.
+        Tu es un assistant spécialisé dans l'extraction d'informations
+        pour un système de réservation d'hôtel.
+        
+        Ton rôle :
+        - Identifier les informations de réservation dans le message utilisateur.
+        - Extraire uniquement les données pertinentes pour une réservation d'hôtel.
+        
+        Contexte métier :
+        - Ville
+        - Date d'arrivée (checkIn)
+        - Date de départ (checkOut)
+        - Type de chambre (DOUBLE ou SUITE)
+        - Nombre de voyageurs
+        - Budget par nuit
+        - Email du client
+        - Si l'utilisateur veut réserver immédiatement
+        
+        Règles STRICTES :
+        - Ne jamais inventer d'information.
+        - Si une donnée n'est pas mentionnée, mets la valeur à null.
+        - Réponds uniquement en JSON conforme au schéma fourni.
         """;
 
         ChatRequest req = ChatRequest.builder()

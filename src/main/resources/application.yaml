@@ -3,9 +3,15 @@ spring:
     name: bookinghotelagent
   datasource:
     url: jdbc:h2:mem:hotel;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: admin
+    password: password
   jpa:
     hibernate:
       ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
   mail:
     host: ${SMTP_HOST:localhost}
     port: ${SMTP_PORT:587}

@@ -1,4 +1,4 @@
-package com.cirta.bookinghotelagent.service;
+package com.cirta.bookinghotelagent.service.agent;
 
 import com.cirta.bookinghotelagent.ai.structured.BookingRequestParser;
 import com.cirta.bookinghotelagent.ai.structured.BookingRequestState;
@@ -8,6 +8,7 @@ import com.cirta.bookinghotelagent.ai.tools.EmailTool;
 import com.cirta.bookinghotelagent.ai.tools.PricingTool;
 import com.cirta.bookinghotelagent.domain.Booking;
 import com.cirta.bookinghotelagent.domain.Quote;
+import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -20,6 +21,7 @@ public class AgentOrchestrator {
     private final PricingTool pricingTool;
     private final BookingTool bookingTool;
     private final EmailTool emailTool;
+    private final BookingSessionStateStore stateStore;
 
     // état session en mémoire (on passera DB/Redis plus tard)
     private final Map<String, BookingRequestState> sessions = new ConcurrentHashMap<>();
@@ -28,21 +30,23 @@ public class AgentOrchestrator {
                              AvailabilityTool availabilityTool,
                              PricingTool pricingTool,
                              BookingTool bookingTool,
-                             EmailTool emailTool) {
+                             EmailTool emailTool, BookingSessionStateStore stateStore) {
         this.parser = parser;
         this.availabilityTool = availabilityTool;
         this.pricingTool = pricingTool;
         this.bookingTool = bookingTool;
         this.emailTool = emailTool;
+        this.stateStore = stateStore;
     }
 
     public String handle(String sessionId, String userMessage) {
         // 1) parse structuré
         var draft = parser.parse(userMessage);
 
-        // 2) merge avec l’état session
-        var state = sessions.computeIfAbsent(sessionId, id -> new BookingRequestState());
+        // 2) Charger état depuis DB + merge + save
+        BookingRequestState state = stateStore.loadOrNew(sessionId);
         state.merge(draft);
+        stateStore.save(sessionId, state);
 
         // 3) validation “métier” progressive
         String question = nextMissingQuestion(state);
@@ -120,7 +124,7 @@ public class AgentOrchestrator {
         String emailResult = emailTool.sendBookingConfirmationEmail(booking);
 
         // Option: reset state ou le garder
-        sessions.remove(sessionId);
+        stateStore.delete(sessionId);
 
         return """
         Réservation confirmée ✅
@@ -151,6 +155,7 @@ public class AgentOrchestrator {
         if (s.checkOut == null) return "Quelle est ta date de départ (YYYY-MM-DD) ?";
         if (isBlank(s.roomType)) return "Quel type de chambre veux-tu ? (DOUBLE ou SUITE)";
         if (s.guests == null || s.guests <= 0) return "Pour combien de personnes ?";
+        if (isBlank(s.guestFullName)) return "Quel est ton nom complet (pour la réservation) ?";
         return null;
     }
 
