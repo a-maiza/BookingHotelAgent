@@ -2,10 +2,6 @@ package com.cirta.bookinghotelagent.service.agent;
 
 import com.cirta.bookinghotelagent.ai.structured.BookingRequestParser;
 import com.cirta.bookinghotelagent.ai.structured.BookingRequestState;
-import com.cirta.bookinghotelagent.ai.tools.AvailabilityTool;
-import com.cirta.bookinghotelagent.ai.tools.BookingTool;
-import com.cirta.bookinghotelagent.ai.tools.EmailTool;
-import com.cirta.bookinghotelagent.ai.tools.PricingTool;
 import com.cirta.bookinghotelagent.api.AgentResponse;
 import com.cirta.bookinghotelagent.api.AgentStatus;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
@@ -21,51 +17,41 @@ import java.util.HexFormat;
 @Service
 public class AgentOrchestrator {
     private final BookingRequestParser parser;
-    private final AvailabilityTool availabilityTool;
-    private final PricingTool pricingTool;
-    private final BookingTool bookingTool;
-    private final EmailTool emailTool;
+    private final AvailabilityService availabilityService;
+    private final PricingService pricingService;
+    private final BookingService bookingService;
+    private final EmailService emailService;
     private final BookingSessionStateStore stateStore;
     private final BookingIdempotencyStore idempotencyStore;
 
-
     public AgentOrchestrator(BookingRequestParser parser,
-                             AvailabilityTool availabilityTool,
-                             PricingTool pricingTool,
-                             BookingTool bookingTool,
-                             EmailTool emailTool,
+                             AvailabilityService availabilityService,
+                             PricingService pricingService,
+                             BookingService bookingService,
+                             EmailService emailService,
                              BookingSessionStateStore stateStore,
                              BookingIdempotencyStore idempotencyStore) {
         this.parser = parser;
-        this.availabilityTool = availabilityTool;
-        this.pricingTool = pricingTool;
-        this.bookingTool = bookingTool;
-        this.emailTool = emailTool;
+        this.availabilityService = availabilityService;
+        this.pricingService = pricingService;
+        this.bookingService = bookingService;
+        this.emailService = emailService;
         this.stateStore = stateStore;
         this.idempotencyStore = idempotencyStore;
     }
 
     public AgentResponse handle(String sessionId, String userMessage) {
-        // 1) parse structuré
         var draft = parser.parse(userMessage);
 
-        // 2) Charger état depuis DB + merge + save
         BookingRequestState state = stateStore.loadOrNew(sessionId);
         state.merge(draft);
         stateStore.save(sessionId, state);
 
-        // 3) validation “métier” progressive
         String missing = nextMissingQuestion(state);
         if (missing != null) {
-            return new AgentResponse(
-                    sessionId,
-                    AgentStatus.MISSING_INFO,
-                    null,
-                    missing
-            );
+            return new AgentResponse(sessionId, AgentStatus.MISSING_INFO, null, missing);
         }
 
-        // 4) check cohérence dates
         if (!state.checkOut.isAfter(state.checkIn)) {
             return new AgentResponse(
                     sessionId,
@@ -75,14 +61,7 @@ public class AgentOrchestrator {
             );
         }
 
-        // 5) disponibilité
-        var availability = availabilityTool.checkAvailability(
-                state.city,
-                state.roomType,
-                state.checkIn.toString(),
-                state.checkOut.toString()
-        );
-
+        var availability = availabilityService.check(state);
         if (availability.availableRooms() <= 0) {
             return new AgentResponse(
                     sessionId,
@@ -92,40 +71,17 @@ public class AgentOrchestrator {
             );
         }
 
-        // 6) devis
-        double budget = (state.budgetPerNight != null) ? state.budgetPerNight : 0.0;
-        PricingResult quote = pricingTool.quote(
-                state.city,
-                state.roomType,
-                state.guests,
-                state.checkIn.toString(),
-                state.checkOut.toString(),
-                budget
-        );
+        PricingResult quote = pricingService.quote(state);
 
-        // 7) confirmation explicite si l'utilisateur n’a pas demandé “réserve”
         if (!state.wantsToBookNow) {
-            return new AgentResponse(
-                    sessionId,
-                    AgentStatus.QUOTE_READY,
-                    quote,
-                    "Confirmez-vous la réservation ?"
-            );
+            return new AgentResponse(sessionId, AgentStatus.QUOTE_READY, quote, "Confirmez-vous la réservation ?");
         }
 
-        // 8) email requis pour confirmation finale (dans ta spec)
         if (state.email == null || state.email.isBlank()) {
-            return new AgentResponse(
-                    sessionId,
-                    AgentStatus.EMAIL_REQUIRED,
-                    quote,
-                    "Veuillez fournir un email pour confirmer."
-            );
+            return new AgentResponse(sessionId, AgentStatus.EMAIL_REQUIRED, quote, "Veuillez fournir un email pour confirmer.");
         }
 
-        String idempotencyKey = buildBookingIdempotencyKey(sessionId, quote, state.guestFullName, state.email);
-
-        var existingBooking = idempotencyStore.findCompletedBooking(idempotencyKey);
+        var existingBooking = bookingService.findAlreadyConfirmed(sessionId, quote, state.guestFullName, state.email);
         if (existingBooking.isPresent()) {
             return new AgentResponse(
                     sessionId,
@@ -135,7 +91,7 @@ public class AgentOrchestrator {
             );
         }
 
-        if (!idempotencyStore.claim(idempotencyKey)) {
+        if (!bookingService.claim(sessionId, quote, state.guestFullName, state.email)) {
             return new AgentResponse(
                     sessionId,
                     AgentStatus.ERROR,
@@ -144,15 +100,10 @@ public class AgentOrchestrator {
             );
         }
 
-        // 9) création réservation
-        BookingCreateResult bookingCreateResult = bookingTool.createBooking(quote, state.guestFullName, state.email);
+        BookingCreateResult bookingCreateResult = bookingService.create(quote, state.guestFullName, state.email);
+        emailService.sendBookingConfirmation(bookingCreateResult.booking());
+        bookingService.markCompleted(sessionId, quote, state.guestFullName, state.email, bookingCreateResult.booking());
 
-        // 10) envoi email
-        emailTool.sendBookingConfirmationEmail(bookingCreateResult.booking());
-
-        idempotencyStore.markCompleted(idempotencyKey, bookingCreateResult.booking());
-
-        // Option: reset state ou le garder
         stateStore.delete(sessionId);
 
         return new AgentResponse(

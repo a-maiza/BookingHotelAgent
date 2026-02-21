@@ -26,6 +26,7 @@ spring:
           auth: true
           starttls:
             enable: true
+
 app:
   openai:
     api-key: ${OPENAI_API_KEY:dummy}
