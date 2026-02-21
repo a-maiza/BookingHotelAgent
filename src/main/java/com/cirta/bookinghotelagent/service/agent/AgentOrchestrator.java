@@ -2,68 +2,57 @@ package com.cirta.bookinghotelagent.service.agent;
 
 import com.cirta.bookinghotelagent.ai.structured.BookingRequestParser;
 import com.cirta.bookinghotelagent.ai.structured.BookingRequestState;
-import com.cirta.bookinghotelagent.ai.tools.AvailabilityTool;
-import com.cirta.bookinghotelagent.ai.tools.BookingTool;
-import com.cirta.bookinghotelagent.ai.tools.EmailTool;
-import com.cirta.bookinghotelagent.ai.tools.PricingTool;
 import com.cirta.bookinghotelagent.api.AgentResponse;
 import com.cirta.bookinghotelagent.api.AgentStatus;
-import com.cirta.bookinghotelagent.domain.Quote;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
-import com.cirta.bookinghotelagent.domain.result.EmailSendResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
+import com.cirta.bookinghotelagent.rag.PolicyRetriever;
 import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
 import org.springframework.stereotype.Service;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AgentOrchestrator {
     private final BookingRequestParser parser;
-    private final AvailabilityTool availabilityTool;
-    private final PricingTool pricingTool;
-    private final BookingTool bookingTool;
-    private final EmailTool emailTool;
+    private final AvailabilityService availabilityService;
+    private final PricingService pricingService;
+    private final BookingService bookingService;
+    private final EmailService emailService;
     private final BookingSessionStateStore stateStore;
-
-    // état session en mémoire (on passera DB/Redis plus tard)
-    private final Map<String, BookingRequestState> sessions = new ConcurrentHashMap<>();
+    private final PolicyRetriever policyRetriever;
 
     public AgentOrchestrator(BookingRequestParser parser,
-                             AvailabilityTool availabilityTool,
-                             PricingTool pricingTool,
-                             BookingTool bookingTool,
-                             EmailTool emailTool, BookingSessionStateStore stateStore) {
+                             AvailabilityService availabilityService,
+                             PricingService pricingService,
+                             BookingService bookingService,
+                             EmailService emailService,
+                             BookingSessionStateStore stateStore,
+                             PolicyRetriever policyRetriever) {
         this.parser = parser;
-        this.availabilityTool = availabilityTool;
-        this.pricingTool = pricingTool;
-        this.bookingTool = bookingTool;
-        this.emailTool = emailTool;
+        this.availabilityService = availabilityService;
+        this.pricingService = pricingService;
+        this.bookingService = bookingService;
+        this.emailService = emailService;
         this.stateStore = stateStore;
+        this.policyRetriever = policyRetriever;
     }
 
     public AgentResponse handle(String sessionId, String userMessage) {
-        // 1) parse structuré
+        if (policyRetriever.isPolicyQuestion(userMessage)) {
+            String policyAnswer = policyRetriever.retrieve(userMessage);
+            return new AgentResponse(sessionId, AgentStatus.POLICY_INFO, null, policyAnswer);
+        }
+
         var draft = parser.parse(userMessage);
 
-        // 2) Charger état depuis DB + merge + save
         BookingRequestState state = stateStore.loadOrNew(sessionId);
         state.merge(draft);
         stateStore.save(sessionId, state);
 
-        // 3) validation “métier” progressive
         String missing = nextMissingQuestion(state);
         if (missing != null) {
-            return new AgentResponse(
-                    sessionId,
-                    AgentStatus.MISSING_INFO,
-                    null,
-                    missing
-            );
+            return new AgentResponse(sessionId, AgentStatus.MISSING_INFO, null, missing);
         }
 
-        // 4) check cohérence dates
         if (!state.checkOut.isAfter(state.checkIn)) {
             return new AgentResponse(
                     sessionId,
@@ -73,14 +62,7 @@ public class AgentOrchestrator {
             );
         }
 
-        // 5) disponibilité
-        var availability = availabilityTool.checkAvailability(
-                state.city,
-                state.roomType,
-                state.checkIn.toString(),
-                state.checkOut.toString()
-        );
-
+        var availability = availabilityService.check(state);
         if (availability.availableRooms() <= 0) {
             return new AgentResponse(
                     sessionId,
@@ -90,44 +72,39 @@ public class AgentOrchestrator {
             );
         }
 
-        // 6) devis
-        double budget = (state.budgetPerNight != null) ? state.budgetPerNight : 0.0;
-        PricingResult quote = pricingTool.quote(
-                state.city,
-                state.roomType,
-                state.guests,
-                state.checkIn.toString(),
-                state.checkOut.toString(),
-                budget
-        );
+        PricingResult quote = pricingService.quote(state);
 
-        // 7) confirmation explicite si l'utilisateur n’a pas demandé “réserve”
         if (!state.wantsToBookNow) {
-            return new AgentResponse(
-                    sessionId,
-                    AgentStatus.QUOTE_READY,
-                    quote,
-                    "Confirmez-vous la réservation ?"
-            );
+            return new AgentResponse(sessionId, AgentStatus.QUOTE_READY, quote, "Confirmez-vous la réservation ?");
         }
 
-        // 8) email requis pour confirmation finale (dans ta spec)
         if (state.email == null || state.email.isBlank()) {
+            return new AgentResponse(sessionId, AgentStatus.EMAIL_REQUIRED, quote, "Veuillez fournir un email pour confirmer.");
+        }
+
+        var existingBooking = bookingService.findAlreadyConfirmed(sessionId, quote, state.guestFullName, state.email);
+        if (existingBooking.isPresent()) {
             return new AgentResponse(
                     sessionId,
-                    AgentStatus.EMAIL_REQUIRED,
-                    quote,
-                    "Veuillez fournir un email pour confirmer."
+                    AgentStatus.BOOKING_CONFIRMED,
+                    existingBooking.get(),
+                    "Réservation déjà confirmée (idempotence)."
             );
         }
 
-        // 9) création réservation
-        BookingCreateResult bookingCreateResult = bookingTool.createBooking(quote, state.guestFullName, state.email);
+        if (!bookingService.claim(sessionId, quote, state.guestFullName, state.email)) {
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.ERROR,
+                    null,
+                    "Une demande de réservation identique est déjà en cours de traitement."
+            );
+        }
 
-        // 10) envoi email
-        EmailSendResult emailResult = emailTool.sendBookingConfirmationEmail(bookingCreateResult.booking());
+        BookingCreateResult bookingCreateResult = bookingService.create(quote, state.guestFullName, state.email);
+        emailService.sendBookingConfirmation(bookingCreateResult.booking());
+        bookingService.markCompleted(sessionId, quote, state.guestFullName, state.email, bookingCreateResult.booking());
 
-        // Option: reset state ou le garder
         stateStore.delete(sessionId);
 
         return new AgentResponse(
