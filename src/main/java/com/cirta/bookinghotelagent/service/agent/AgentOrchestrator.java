@@ -8,15 +8,15 @@ import com.cirta.bookinghotelagent.ai.tools.EmailTool;
 import com.cirta.bookinghotelagent.ai.tools.PricingTool;
 import com.cirta.bookinghotelagent.api.AgentResponse;
 import com.cirta.bookinghotelagent.api.AgentStatus;
-import com.cirta.bookinghotelagent.domain.Quote;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
-import com.cirta.bookinghotelagent.domain.result.EmailSendResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
+import com.cirta.bookinghotelagent.service.BookingIdempotencyStore;
 import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 @Service
 public class AgentOrchestrator {
@@ -26,21 +26,23 @@ public class AgentOrchestrator {
     private final BookingTool bookingTool;
     private final EmailTool emailTool;
     private final BookingSessionStateStore stateStore;
+    private final BookingIdempotencyStore idempotencyStore;
 
-    // état session en mémoire (on passera DB/Redis plus tard)
-    private final Map<String, BookingRequestState> sessions = new ConcurrentHashMap<>();
 
     public AgentOrchestrator(BookingRequestParser parser,
                              AvailabilityTool availabilityTool,
                              PricingTool pricingTool,
                              BookingTool bookingTool,
-                             EmailTool emailTool, BookingSessionStateStore stateStore) {
+                             EmailTool emailTool,
+                             BookingSessionStateStore stateStore,
+                             BookingIdempotencyStore idempotencyStore) {
         this.parser = parser;
         this.availabilityTool = availabilityTool;
         this.pricingTool = pricingTool;
         this.bookingTool = bookingTool;
         this.emailTool = emailTool;
         this.stateStore = stateStore;
+        this.idempotencyStore = idempotencyStore;
     }
 
     public AgentResponse handle(String sessionId, String userMessage) {
@@ -121,11 +123,34 @@ public class AgentOrchestrator {
             );
         }
 
+        String idempotencyKey = buildBookingIdempotencyKey(sessionId, quote, state.guestFullName, state.email);
+
+        var existingBooking = idempotencyStore.findCompletedBooking(idempotencyKey);
+        if (existingBooking.isPresent()) {
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.BOOKING_CONFIRMED,
+                    existingBooking.get(),
+                    "Réservation déjà confirmée (idempotence)."
+            );
+        }
+
+        if (!idempotencyStore.claim(idempotencyKey)) {
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.ERROR,
+                    null,
+                    "Une demande de réservation identique est déjà en cours de traitement."
+            );
+        }
+
         // 9) création réservation
         BookingCreateResult bookingCreateResult = bookingTool.createBooking(quote, state.guestFullName, state.email);
 
         // 10) envoi email
-        EmailSendResult emailResult = emailTool.sendBookingConfirmationEmail(bookingCreateResult.booking());
+        emailTool.sendBookingConfirmationEmail(bookingCreateResult.booking());
+
+        idempotencyStore.markCompleted(idempotencyKey, bookingCreateResult.booking());
 
         // Option: reset state ou le garder
         stateStore.delete(sessionId);
@@ -146,6 +171,28 @@ public class AgentOrchestrator {
         if (s.guests == null || s.guests <= 0) return "Pour combien de personnes ?";
         if (isBlank(s.guestFullName)) return "Quel est ton nom complet (pour la réservation) ?";
         return null;
+    }
+
+    private String buildBookingIdempotencyKey(String sessionId, PricingResult quote, String guestFullName, String email) {
+        String fingerprint = String.join("|",
+                sessionId,
+                quote.quote().city(),
+                quote.quote().checkIn().toString(),
+                quote.quote().checkOut().toString(),
+                quote.quote().roomType().name(),
+                String.valueOf(quote.quote().guests()),
+                String.valueOf(quote.quote().total()),
+                guestFullName == null ? "" : guestFullName.trim().toLowerCase(),
+                email == null ? "" : email.trim().toLowerCase()
+        );
+
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(fingerprint.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("Impossible de calculer la clé d'idempotence", e);
+        }
     }
 
     private static boolean isBlank(String v) {
