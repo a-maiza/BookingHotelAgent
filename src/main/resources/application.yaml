@@ -5,8 +5,8 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/bookinghotel}
     driver-class-name: org.postgresql.Driver
-    username: ${SPRING_DATASOURCE_USERNAME:booking_user}
-    password: ${SPRING_DATASOURCE_PASSWORD:booking_password}
+    username: ${SPRING_DATASOURCE_USERNAME:user}
+    password: ${SPRING_DATASOURCE_PASSWORD:password}
 
   jpa:
     hibernate:
@@ -26,7 +26,6 @@ spring:
           auth: true
           starttls:
             enable: true
-
 app:
   openai:
     api-key: ${OPENAI_API_KEY:dummy}
@@ -38,7 +37,9 @@ logging:
     dev.langchain4j.model.openai: DEBUG
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: TRACE
-    org.springframework.mail: INFO
+#    org.springframework.boot.autoconfigure: DEBUG
+#    org.springframework.boot.autoconfigure.h2: DEBUG
+    org.springframework.mail: INFO # on rend ça configurable
 
 management:
   endpoints:
