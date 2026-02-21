@@ -7,5 +7,6 @@ public enum AgentStatus {
     QUOTE_READY,
     EMAIL_REQUIRED,
     BOOKING_CONFIRMED,
+    POLICY_INFO,
     ERROR
 }

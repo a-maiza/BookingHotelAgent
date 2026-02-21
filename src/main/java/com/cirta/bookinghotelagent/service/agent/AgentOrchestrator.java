@@ -6,6 +6,7 @@ import com.cirta.bookinghotelagent.api.AgentResponse;
 import com.cirta.bookinghotelagent.api.AgentStatus;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
+import com.cirta.bookinghotelagent.rag.PolicyRetriever;
 import com.cirta.bookinghotelagent.service.BookingIdempotencyStore;
 import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ public class AgentOrchestrator {
     private final BookingService bookingService;
     private final EmailService emailService;
     private final BookingSessionStateStore stateStore;
+    private final PolicyRetriever policyRetriever;
     private final BookingIdempotencyStore idempotencyStore;
 
     public AgentOrchestrator(BookingRequestParser parser,
@@ -30,6 +32,7 @@ public class AgentOrchestrator {
                              BookingService bookingService,
                              EmailService emailService,
                              BookingSessionStateStore stateStore,
+                             PolicyRetriever policyRetriever,
                              BookingIdempotencyStore idempotencyStore) {
         this.parser = parser;
         this.availabilityService = availabilityService;
@@ -37,10 +40,16 @@ public class AgentOrchestrator {
         this.bookingService = bookingService;
         this.emailService = emailService;
         this.stateStore = stateStore;
+        this.policyRetriever = policyRetriever;
         this.idempotencyStore = idempotencyStore;
     }
 
     public AgentResponse handle(String sessionId, String userMessage) {
+        if (policyRetriever.isPolicyQuestion(userMessage)) {
+            String policyAnswer = policyRetriever.retrieve(userMessage);
+            return new AgentResponse(sessionId, AgentStatus.POLICY_INFO, null, policyAnswer);
+        }
+
         var draft = parser.parse(userMessage);
 
         BookingRequestState state = stateStore.loadOrNew(sessionId);

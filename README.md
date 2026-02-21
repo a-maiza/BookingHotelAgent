@@ -185,6 +185,7 @@ curl -X POST http://localhost:8080/api/agent/chat \
 - `QUOTE_READY`
 - `EMAIL_REQUIRED`
 - `BOOKING_CONFIRMED`
+- `POLICY_INFO`
 - `ERROR`
 
 
@@ -198,3 +199,25 @@ du contexte de réservation (session + séjour + client).
 
 - si une réservation identique est déjà finalisée, l'API renvoie la réservation existante ;
 - si une réservation identique est déjà en cours, l'API évite un second traitement concurrent.
+
+
+---
+
+## 📚 RAG policies (annulation, règles)
+
+Le projet embarque désormais une base de politiques hôtelières dans `src/main/resources/policies/hotel-policies.md`
+et une récupération RAG simple par pertinence lexicale.
+
+- Questions supportées: annulation, remboursement, check-in/check-out, modifications, paiement, enfants.
+- Si le message utilisateur est détecté comme question de policy, l'agent répond avec `status = POLICY_INFO`.
+
+Exemple:
+
+```bash
+curl -X POST http://localhost:8080/api/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "policy-1",
+    "message": "Quelle est votre politique d'annulation ?"
+  }'
+```
