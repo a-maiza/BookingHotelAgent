@@ -1,256 +1,215 @@
-# 🏨 Hotel Agent – AI Reservation System (Spring Boot + LangChain4j)
+# 🏨 BookingHotelAgent
 
-Un agent intelligent de réservation d’hôtel construit avec :
+Agent de réservation d’hôtel **piloté par backend** (Spring Boot + LangChain4j + OpenAI), avec gestion de session, devis, réservation et envoi d’email.
+
+Ce projet montre une approche robuste :
+- le **LLM extrait** des informations structurées,
+- le backend **orchestré** décide des étapes métier,
+- les tools métier réalisent les actions (dispo, prix, booking, email),
+- l’API retourne un statut explicite à chaque étape.
+
+---
+
+## 🎯 Objectif du projet
+
+Permettre une conversation naturelle de réservation, tout en gardant le contrôle côté serveur :
+1. Comprendre la demande utilisateur (message libre).
+2. Extraire les champs structurés (ville, dates, chambre, etc.).
+3. Compléter l’état de session progressivement.
+4. Vérifier la disponibilité.
+5. Calculer un devis.
+6. Confirmer/réaliser la réservation.
+7. Envoyer l’email de confirmation.
+
+---
+
+## 🧠 Architecture (vue simple)
+
+`Client -> /api/agent/chat -> AgentOrchestrator`
+
+L’orchestrateur enchaîne :
+- `BookingRequestParser` (LLM, extraction structurée),
+- `BookingSessionStateStore` (persist/restore état de session),
+- tools métier :
+  - `AvailabilityTool`,
+  - `PricingTool`,
+  - `BookingTool`,
+  - `EmailTool`.
+
+Le résultat est retourné sous forme de :
+- `sessionId`
+- `status` (`MISSING_INFO`, `QUOTE_READY`, `BOOKING_CONFIRMED`, etc.)
+- `payload`
+- `message`
+
+---
+
+## 📁 Structure du projet
+
+```text
+src/main/java/com/cirta/bookinghotelagent
+├── api/                 # Contrôleurs REST + DTO API
+├── ai/
+│   ├── structured/      # Parsing structuré de la demande utilisateur
+│   └── tools/           # Wrappers tools utilisés par l’agent
+├── config/              # Configuration Spring / LLM / H2
+├── domain/              # Modèles métier (Booking, Quote, etc.)
+├── rag/                 # Ingestion/retrieval de policies (RAG)
+├── repo/                # Entités + repositories JPA
+└── service/
+    ├── agent/           # Orchestration métier principale
+    └── ...              # Services utilitaires
+```
+
+Fichiers clés :
+- `AgentController` : endpoint REST `/api/agent/chat`.
+- `AgentOrchestrator` : logique de décision étape par étape.
+- `application.yaml` : datasource H2, mail, clé OpenAI, logs.
+
+---
+
+## ⚙️ Prérequis
 
 - Java 21
-- Spring Boot 4
-- LangChain4j
-- OpenAI
-- SMTP réel (email confirmation)
-
-Ce projet démontre une architecture production-ready avec :
-
-- ✅ Extraction structurée (JSON Schema)
-- ✅ Orchestration backend déterministe
-- ✅ Gestion d’état par session
-- ✅ Tools métier (availability, pricing, booking, email)
-- ✅ Envoi réel d’email via SMTP
-- ❌ Aucune hallucination de réservation
+- Maven (ou `./mvnw`)
+- Une clé OpenAI
+- (Optionnel pour envoi réel) un SMTP accessible
 
 ---
 
-# 🎯 Objectif
+## 🔧 Configuration
 
-Créer un agent capable de :
+Variables d’environnement recommandées :
 
-1. Comprendre une demande utilisateur libre
-2. Extraire les informations nécessaires
-3. Valider les données
-4. Vérifier la disponibilité
-5. Calculer un devis
-6. Créer une réservation
-7. Envoyer un email de confirmation
-
-Tout en gardant le contrôle total côté backend.
-
----
-
-# 🧠 Architecture
-
-User → REST API → Structured Parser (LLM)  
-            ↓  
-      BookingRequestDraft (JSON)  
-            ↓  
-      BookingRequestState (session)  
-            ↓  
-      AgentOrchestrator  
-            ↓  
-Availability → Quote → Booking → Email
-
----
-
-# 📂 Structure du projet
-
-com.example.hotelagent
-
-- api/
-    - AgentController.java
-    - ChatRequest.java
-    - ChatResponse.java
-
-- ai/
-    - structured/
-        - BookingRequestDraft.java
-        - BookingRequestState.java
-        - BookingRequestParser.java
-
-- service/
-    - AgentOrchestrator.java
-
-- tools/
-    - AvailabilityTool.java
-    - PricingTool.java
-    - BookingTool.java
-    - EmailTool.java
-
-- domain/
-    - Availability.java
-    - Quote.java
-    - Booking.java
-
----
-
-# 🚀 Fonctionnement
-
-## 1️⃣ Extraction structurée (LLM)
-
-Le modèle OpenAI ne réserve rien directement.
-
-Il convertit le message utilisateur en JSON structuré conforme à un schéma strict.
-
-Exemple :
-
-{
-"city": "Paris",
-"checkIn": "2026-03-12",
-"checkOut": "2026-03-14",
-"roomType": "DOUBLE",
-"guests": 2,
-"budgetPerNight": 180,
-"guestFullName": "Maiza Abdeldjalil",
-"email": "moi@example.com",
-"wantsToBookNow": true
-}
-
-Aucune logique métier n’est confiée au LLM.
-
----
-
-## 2️⃣ Orchestration backend
-
-AgentOrchestrator décide :
-
-- quelles données manquent
-- quand poser une question
-- quand appeler les tools
-- quand envoyer l’email
-
-Cela évite :
-
-- ❌ hallucination de prix
-- ❌ fausse référence de réservation
-- ❌ faux email envoyé
-
----
-
-## 3️⃣ Tools métier
-
-### 🔹 AvailabilityTool
-Vérifie la disponibilité (inventaire en mémoire pour la démo).
-
-### 🔹 PricingTool
-Calcule le prix par nuit, les taxes et le total.
-
-### 🔹 BookingTool
-Crée la réservation et génère une référence unique.
-
-### 🔹 EmailTool
-Envoie un email SMTP réel avec confirmation.
-
----
-
-# ⚙️ Configuration
-
-## Variables d’environnement
-
+```bash
 export OPENAI_API_KEY="sk-..."
 export SMTP_HOST="smtp.gmail.com"
 export SMTP_PORT="587"
-export SMTP_USERNAME="your@email.com"
-export SMTP_PASSWORD="app_password"
+export SMTP_USERNAME="votre@email.com"
+export SMTP_PASSWORD="mot_de_passe_app"
+```
 
-⚠️ Si Gmail : utiliser un App Password.
+> Si vous n’avez pas de SMTP réel, l’application peut démarrer mais l’étape d’email peut échouer selon votre configuration.
 
 ---
 
-# 🧪 Test API
+## ▶️ Lancement du projet
 
-## Requête complète
+### 1) Compiler
+```bash
+./mvnw clean package
+```
 
+### 2) Démarrer
+```bash
+./mvnw spring-boot:run
+```
+
+Par défaut, l’API écoute sur :
+- `http://localhost:8080`
+
+H2 Console (activée) :
+- `http://localhost:8080/h2-console`
+
+---
+
+## 🧪 Exemples d’appels cURL
+
+### A. Conversation initiale (informations incomplètes)
+
+```bash
 curl -X POST http://localhost:8080/api/agent/chat \
--H "Content-Type: application/json" \
--d '{
-"sessionId": "demo-1",
-"message": "Je veux une chambre double à Paris du 2026-03-12 au 2026-03-14 pour 2 personnes, budget 180€/nuit. Réserve au nom de Maiza Abdeldjalil et envoie à moi@example.com"
-}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "demo-1",
+    "message": "Je veux réserver un hôtel à Paris"
+  }'
+```
 
-Comportement attendu :
-
-- Vérification disponibilité
-- Calcul du devis
-- Création de la réservation
-- Envoi email
-- Retour de la référence + récapitulatif
+Réponse attendue (exemple) :
+- `status: "MISSING_INFO"`
+- `message: "Quelle est ta date d’arrivée (YYYY-MM-DD) ?"` (ou autre question manquante)
 
 ---
 
-## Requête progressive
+### B. Continuer la même session
 
-{
-"sessionId": "demo-2",
-"message": "Je veux réserver à Paris"
-}
+```bash
+curl -X POST http://localhost:8080/api/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "demo-1",
+    "message": "Arrivée le 2026-03-12, départ le 2026-03-14, chambre double pour 2 personnes, nom Karim Benali"
+  }'
+```
 
-Réponse :
-
-"Quelle est ta date d’arrivée (YYYY-MM-DD) ?"
-
-L’état est conservé par session.
-
----
-
-# 🛡 Pourquoi cette architecture est robuste
-
-Approche classique :
-- LLM pilote tout
-- Risque d’hallucination
-- Réponses non structurées
-- Difficile à tester
-
-Approche utilisée ici :
-- Backend pilote tout
-- Contrôle total
-- JSON Schema strict
-- Workflow déterministe et testable
+L’agent poursuit la collecte et peut retourner :
+- `MISSING_INFO` (si encore des champs manquent),
+- `QUOTE_READY` (devis prêt si l’utilisateur n’a pas demandé de réserver immédiatement),
+- `EMAIL_REQUIRED` (si réservation demandée sans email).
 
 ---
 
-# 📈 Évolutions possibles
+### C. Demande complète avec réservation immédiate
 
-- 🔄 Persistance DB (Postgres + JPA)
-- 🔁 Idempotence des réservations
-- 🧾 Historique utilisateur
-- 📚 RAG (policies PDF : annulation, check-in)
-- 🏨 Intégration API réelle (Amadeus, RapidAPI)
-- 📊 Observabilité (logs tool calls + tracing)
+```bash
+curl -X POST http://localhost:8080/api/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "demo-2",
+    "message": "Je veux une chambre DOUBLE à Paris du 2026-03-12 au 2026-03-14 pour 2 personnes, nom Karim Benali, email karim@example.com, je confirme la réservation maintenant"
+  }'
+```
 
----
-
-# 🧩 Concepts LangChain4j utilisés
-
-- ChatLanguageModel
-- JSON Schema Structured Output
-- ResponseFormat(JSON)
-- SystemMessage strict
-- Tool abstraction
-- Session state backend
+Réponse attendue (si dispo + SMTP OK) :
+- `status: "BOOKING_CONFIRMED"`
+- `payload`: détail de réservation (référence, montants, etc.)
+- `message`: confirmation finale.
 
 ---
 
-# 🎓 Ce que ce projet démontre
+### D. Tester un cas de dates invalides
 
-✔️ Utilisation propre de LangChain4j en production  
-✔️ Prévention des hallucinations LLM  
-✔️ Combinaison IA + logique métier Java  
-✔️ Architecture agent scalable et maintenable
+```bash
+curl -X POST http://localhost:8080/api/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "demo-3",
+    "message": "Réserve à Lyon du 2026-05-10 au 2026-05-08, chambre DOUBLE pour 2 personnes, nom Nora Saidi"
+  }'
+```
 
----
-
-# 📌 Stack technique
-
-- Java 21
-- Spring Boot 4
-- LangChain4j 1.11.x
-- OpenAI GPT-4.1-mini
-- SMTP réel
+Réponse attendue :
+- `status: "INVALID_DATES"`
+- message demandant une date de départ valide.
 
 ---
 
-# 👨‍💻 Auteur
+## 🧾 Statuts API possibles
 
-Projet expérimental de montée en compétence sur :
+- `MISSING_INFO` : il manque des informations.
+- `INVALID_DATES` : check-out <= check-in.
+- `NO_AVAILABILITY` : aucune chambre dispo.
+- `QUOTE_READY` : devis calculé, en attente de confirmation.
+- `EMAIL_REQUIRED` : email nécessaire avant finalisation.
+- `BOOKING_CONFIRMED` : réservation créée + email envoyé.
+- `ERROR` : erreur technique.
 
-- Agents IA
-- Orchestration backend
-- Structured outputs
-- Architecture IA robuste
+---
+
+## ✅ Pourquoi cette approche est fiable
+
+- Le LLM n’exécute pas d’action métier sensible.
+- La logique de décision est déterministe côté backend.
+- Les étapes sont traçables via des statuts API.
+- L’état de conversation est maintenu par `sessionId`.
+
+---
+
+## 🔭 Pistes d’amélioration
+
+- Passage de H2 vers PostgreSQL.
+- Idempotence forte des réservations.
+- Historique multi-sessions par utilisateur.
+- RAG enrichi (politiques annulation, check-in/check-out, etc.).
+- Monitoring plus avancé (traces tools + latence LLM).
