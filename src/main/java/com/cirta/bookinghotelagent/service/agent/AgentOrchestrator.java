@@ -6,8 +6,13 @@ import com.cirta.bookinghotelagent.api.AgentResponse;
 import com.cirta.bookinghotelagent.api.AgentStatus;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
+import com.cirta.bookinghotelagent.service.BookingIdempotencyStore;
 import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
 import org.springframework.stereotype.Service;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 @Service
 public class AgentOrchestrator {
@@ -17,19 +22,22 @@ public class AgentOrchestrator {
     private final BookingService bookingService;
     private final EmailService emailService;
     private final BookingSessionStateStore stateStore;
+    private final BookingIdempotencyStore idempotencyStore;
 
     public AgentOrchestrator(BookingRequestParser parser,
                              AvailabilityService availabilityService,
                              PricingService pricingService,
                              BookingService bookingService,
                              EmailService emailService,
-                             BookingSessionStateStore stateStore) {
+                             BookingSessionStateStore stateStore,
+                             BookingIdempotencyStore idempotencyStore) {
         this.parser = parser;
         this.availabilityService = availabilityService;
         this.pricingService = pricingService;
         this.bookingService = bookingService;
         this.emailService = emailService;
         this.stateStore = stateStore;
+        this.idempotencyStore = idempotencyStore;
     }
 
     public AgentResponse handle(String sessionId, String userMessage) {
@@ -114,6 +122,28 @@ public class AgentOrchestrator {
         if (s.guests == null || s.guests <= 0) return "Pour combien de personnes ?";
         if (isBlank(s.guestFullName)) return "Quel est ton nom complet (pour la réservation) ?";
         return null;
+    }
+
+    private String buildBookingIdempotencyKey(String sessionId, PricingResult quote, String guestFullName, String email) {
+        String fingerprint = String.join("|",
+                sessionId,
+                quote.quote().city(),
+                quote.quote().checkIn().toString(),
+                quote.quote().checkOut().toString(),
+                quote.quote().roomType().name(),
+                String.valueOf(quote.quote().guests()),
+                String.valueOf(quote.quote().total()),
+                guestFullName == null ? "" : guestFullName.trim().toLowerCase(),
+                email == null ? "" : email.trim().toLowerCase()
+        );
+
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(fingerprint.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("Impossible de calculer la clé d'idempotence", e);
+        }
     }
 
     private static boolean isBlank(String v) {
