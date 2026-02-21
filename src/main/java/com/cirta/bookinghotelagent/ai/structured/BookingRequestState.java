@@ -1,7 +1,5 @@
 package com.cirta.bookinghotelagent.ai.structured;
 
-import org.springframework.stereotype.Component;
-
 import java.time.LocalDate;
 
 public class BookingRequestState {

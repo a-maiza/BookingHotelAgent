@@ -6,8 +6,12 @@ import com.cirta.bookinghotelagent.ai.tools.AvailabilityTool;
 import com.cirta.bookinghotelagent.ai.tools.BookingTool;
 import com.cirta.bookinghotelagent.ai.tools.EmailTool;
 import com.cirta.bookinghotelagent.ai.tools.PricingTool;
-import com.cirta.bookinghotelagent.domain.Booking;
+import com.cirta.bookinghotelagent.api.AgentResponse;
+import com.cirta.bookinghotelagent.api.AgentStatus;
 import com.cirta.bookinghotelagent.domain.Quote;
+import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
+import com.cirta.bookinghotelagent.domain.result.EmailSendResult;
+import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
 import org.springframework.stereotype.Service;
 
@@ -39,7 +43,7 @@ public class AgentOrchestrator {
         this.stateStore = stateStore;
     }
 
-    public String handle(String sessionId, String userMessage) {
+    public AgentResponse handle(String sessionId, String userMessage) {
         // 1) parse structuré
         var draft = parser.parse(userMessage);
 
@@ -49,14 +53,24 @@ public class AgentOrchestrator {
         stateStore.save(sessionId, state);
 
         // 3) validation “métier” progressive
-        String question = nextMissingQuestion(state);
-        if (question != null) {
-            return question;
+        String missing = nextMissingQuestion(state);
+        if (missing != null) {
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.MISSING_INFO,
+                    null,
+                    missing
+            );
         }
 
         // 4) check cohérence dates
         if (!state.checkOut.isAfter(state.checkIn)) {
-            return "La date de départ doit être après la date d’arrivée. Quelle est ta date de départ (YYYY-MM-DD) ?";
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.INVALID_DATES,
+                    null,
+                    "La date de départ doit être après la date d’arrivée. Quelle est ta date de départ (YYYY-MM-DD) ?"
+            );
         }
 
         // 5) disponibilité
@@ -68,15 +82,17 @@ public class AgentOrchestrator {
         );
 
         if (availability.availableRooms() <= 0) {
-            return """
-            Désolé, je n’ai plus de disponibilité pour %s à %s sur ces dates.
-            Tu veux que je propose une SUITE ou d’autres dates ?
-            """.formatted(state.roomType, state.city);
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.NO_AVAILABILITY,
+                    availability,
+                    "Désolé, je n’ai plus de disponibilité pour %s à %s sur ces dates. Tu veux que je propose une SUITE ou d’autres dates ?"
+            );
         }
 
         // 6) devis
         double budget = (state.budgetPerNight != null) ? state.budgetPerNight : 0.0;
-        Quote quote = pricingTool.quote(
+        PricingResult quote = pricingTool.quote(
                 state.city,
                 state.roomType,
                 state.guests,
@@ -87,65 +103,38 @@ public class AgentOrchestrator {
 
         // 7) confirmation explicite si l'utilisateur n’a pas demandé “réserve”
         if (!state.wantsToBookNow) {
-            return """
-            J’ai de la disponibilité ✅
-            
-            Devis:
-            - Ville: %s
-            - Dates: %s → %s
-            - Chambre: %s
-            - Voyageurs: %d
-            - Prix/nuit: %.2f €
-            - Taxes: %.2f €
-            - Total: %.2f €
-            
-            Souhaites-tu que je confirme la réservation ?
-            """.formatted(
-                    quote.city(),
-                    quote.checkIn(),
-                    quote.checkOut(),
-                    quote.roomType(),
-                    quote.guests(),
-                    quote.pricePerNight(),
-                    quote.taxes(),
-                    quote.total()
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.QUOTE_READY,
+                    quote,
+                    "Confirmez-vous la réservation ?"
             );
         }
 
         // 8) email requis pour confirmation finale (dans ta spec)
         if (state.email == null || state.email.isBlank()) {
-            return "Pour confirmer la réservation et t’envoyer l’email, j’ai besoin de ton email. Quelle adresse ?";
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.EMAIL_REQUIRED,
+                    quote,
+                    "Veuillez fournir un email pour confirmer."
+            );
         }
 
         // 9) création réservation
-        Booking booking = bookingTool.createBooking(quote, state.guestFullName, state.email);
+        BookingCreateResult bookingCreateResult = bookingTool.createBooking(quote, state.guestFullName, state.email);
 
         // 10) envoi email
-        String emailResult = emailTool.sendBookingConfirmationEmail(booking);
+        EmailSendResult emailResult = emailTool.sendBookingConfirmationEmail(bookingCreateResult.booking());
 
         // Option: reset state ou le garder
         stateStore.delete(sessionId);
 
-        return """
-        Réservation confirmée ✅
-        
-        - Référence: %s
-        - Ville: %s
-        - Dates: %s → %s
-        - Chambre: %s
-        - Voyageurs: %d
-        - Total: %.2f €
-        
-        %s
-        """.formatted(
-                booking.bookingRef(),
-                booking.city(),
-                booking.checkIn(),
-                booking.checkOut(),
-                booking.roomType(),
-                booking.guests(),
-                booking.totalPrice(),
-                emailResult
+        return new AgentResponse(
+                sessionId,
+                AgentStatus.BOOKING_CONFIRMED,
+                bookingCreateResult.booking(),
+                "Réservation confirmée et email envoyé."
         );
     }
 
