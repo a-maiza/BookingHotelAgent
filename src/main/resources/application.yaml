@@ -32,6 +32,22 @@ app:
     api-key: ${OPENAI_API_KEY:dummy}
     model: gpt-4.1-mini
 
+  rag:
+    namespace: policies
+    top-k: 4
+    min-score: 0.70
+    chunk-size: 700
+    chunk-overlap: 100
+    embedding-model: text-embedding-3-small
+    embedding-dimension: 1536
+    pgvector:
+      host: ${RAG_PGVECTOR_HOST:localhost}
+      port: ${RAG_PGVECTOR_PORT:5432}
+      database: ${RAG_PGVECTOR_DB:bookinghotel}
+      user: ${RAG_PGVECTOR_USER:user}
+      password: ${RAG_PGVECTOR_PASSWORD:password}
+      table: ${RAG_PGVECTOR_TABLE:policy_embeddings}
+
 logging:
   level:
     dev.langchain4j: DEBUG

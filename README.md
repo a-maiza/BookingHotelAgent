@@ -69,7 +69,7 @@ src/main/java/com/cirta/bookinghotelagent
 
 ## 🐘 PostgreSQL avec Docker Compose
 
-Le projet est maintenant configuré pour PostgreSQL avec le fichier `docker-compose.yml`.
+Le projet est maintenant configuré pour PostgreSQL + **pgvector** avec le fichier `docker-compose.yml`.
 
 ### 1) Démarrer PostgreSQL
 
@@ -86,9 +86,18 @@ docker compose logs -f postgres
 
 Configuration par défaut du conteneur :
 - DB : `bookinghotel`
-- User : `booking_user`
-- Password : `booking_password`
+- User : `user`
+- Password : `password`
 - Port local : `5432`
+
+
+### 3) Vérifier l’extension pgvector
+
+```bash
+docker compose exec postgres psql -U user -d bookinghotel -c "\dx"
+```
+
+Tu dois voir l’extension `vector` dans la liste.
 
 ---
 
@@ -98,8 +107,8 @@ Variables d’environnement principales :
 
 ```bash
 export SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5432/bookinghotel"
-export SPRING_DATASOURCE_USERNAME="booking_user"
-export SPRING_DATASOURCE_PASSWORD="booking_password"
+export SPRING_DATASOURCE_USERNAME="user"
+export SPRING_DATASOURCE_PASSWORD="password"
 
 export OPENAI_API_KEY="sk-..."
 export SMTP_HOST="smtp.gmail.com"
@@ -219,5 +228,36 @@ curl -X POST http://localhost:8080/api/agent/chat \
   -d '{
     "sessionId": "policy-1",
     "message": "Quelle est votre politique d'annulation ?"
+  }'
+```
+
+
+## 🧠 RAG vectoriel (LangChain4j + PGVector)
+
+Le module policy utilise désormais un **RAG vectoriel** :
+- ingestion du fichier `policies/hotel-policies.md` au démarrage ;
+- découpage par sections markdown (fallback par taille de chunks) ;
+- embeddings OpenAI stockés en base PostgreSQL via `pgvector` (`policy_embeddings`) ;
+- récupération sémantique par similarité (`top-k`, `min-score` configurables).
+
+L’ingestion est **idempotente** : un hash SHA-256 du markdown est stocké en DB (`rag_ingestion_state`) et l’index n’est reconstruit que si le contenu change.
+
+> Choix technique : intégration officielle LangChain4j `PgVectorEmbeddingStore` (alignée avec la version BOM LangChain4j du projet).
+
+Exemples de tests policy :
+
+```bash
+curl -X POST http://localhost:8080/api/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "policy-cancel-1",
+    "message": "Quelle est votre politique d'annulation ?"
+  }'
+
+curl -X POST http://localhost:8080/api/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "policy-checkin-1",
+    "message": "C'est quoi les règles de check-in/check-out ?"
   }'
 ```
