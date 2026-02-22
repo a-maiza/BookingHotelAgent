@@ -2,7 +2,6 @@ package com.cirta.bookinghotelagent.service.agent;
 
 import com.cirta.bookinghotelagent.ai.tools.AvailabilityTool;
 import com.cirta.bookinghotelagent.ai.structured.BookingRequestState;
-import com.cirta.bookinghotelagent.domain.Availability;
 import com.cirta.bookinghotelagent.domain.result.AvailabilityCheckResult;
 import org.springframework.stereotype.Service;
 
