@@ -38,9 +38,7 @@ logging:
     dev.langchain4j.model.openai: DEBUG
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: TRACE
-#    org.springframework.boot.autoconfigure: DEBUG
-#    org.springframework.boot.autoconfigure.h2: DEBUG
-    org.springframework.mail: INFO # on rend ça configurable
+    org.springframework.mail: INFO
 
 management:
   endpoints:
