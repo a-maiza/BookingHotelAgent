@@ -32,6 +32,12 @@ app:
     api-key: ${OPENAI_API_KEY:dummy}
     model: gpt-4.1-mini
 
+
+  amadeus:
+    base-url: ${AMADEUS_BASE_URL:https://test.api.amadeus.com}
+    api-key: ${AMADEUS_API_KEY:}
+    api-secret: ${AMADEUS_API_SECRET:}
+
   rag:
     namespace: policies
     top-k: 4

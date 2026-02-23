@@ -7,13 +7,8 @@ import com.cirta.bookinghotelagent.api.AgentStatus;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.rag.PolicyRetriever;
-import com.cirta.bookinghotelagent.service.BookingIdempotencyStore;
 import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
 import org.springframework.stereotype.Service;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.HexFormat;
 
 @Service
 public class AgentOrchestrator {
@@ -24,7 +19,7 @@ public class AgentOrchestrator {
     private final EmailService emailService;
     private final BookingSessionStateStore stateStore;
     private final PolicyRetriever policyRetriever;
-    private final BookingIdempotencyStore idempotencyStore;
+    private final ServiceMessageFormatter serviceMessageFormatter;
 
     public AgentOrchestrator(BookingRequestParser parser,
                              AvailabilityService availabilityService,
@@ -33,7 +28,7 @@ public class AgentOrchestrator {
                              EmailService emailService,
                              BookingSessionStateStore stateStore,
                              PolicyRetriever policyRetriever,
-                             BookingIdempotencyStore idempotencyStore) {
+                             ServiceMessageFormatter serviceMessageFormatter) {
         this.parser = parser;
         this.availabilityService = availabilityService;
         this.pricingService = pricingService;
@@ -41,7 +36,7 @@ public class AgentOrchestrator {
         this.emailService = emailService;
         this.stateStore = stateStore;
         this.policyRetriever = policyRetriever;
-        this.idempotencyStore = idempotencyStore;
+        this.serviceMessageFormatter = serviceMessageFormatter;
     }
 
     public AgentResponse handle(String sessionId, String userMessage) {
@@ -71,19 +66,25 @@ public class AgentOrchestrator {
         }
 
         var availability = availabilityService.check(state);
-        if (availability.availableRooms() <= 0) {
-            return new AgentResponse(
-                    sessionId,
-                    AgentStatus.NO_AVAILABILITY,
-                    availability,
-                    "Désolé, je n’ai plus de disponibilité pour %s à %s sur ces dates. Tu veux que je propose une SUITE ou d’autres dates ?"
+        Integer availableRooms = availability.availableRooms();
+        if (availableRooms == null || availableRooms <= 0) {
+            String msg = serviceMessageFormatter.format(
+                    "availability_no",
+                    availability.toString(),
+                    "Désolé, je n’ai plus de disponibilité pour ces dates. Voulez-vous d'autres options ?"
             );
+            return new AgentResponse(sessionId, AgentStatus.NO_AVAILABILITY, availability, msg);
         }
 
         PricingResult quote = pricingService.quote(state);
 
         if (!state.wantsToBookNow) {
-            return new AgentResponse(sessionId, AgentStatus.QUOTE_READY, quote, "Confirmez-vous la réservation ?");
+            String msg = serviceMessageFormatter.format(
+                    "quote_ready",
+                    quote.toString(),
+                    "Voici votre devis. Confirmez-vous la réservation ?"
+            );
+            return new AgentResponse(sessionId, AgentStatus.QUOTE_READY, quote, msg);
         }
 
         if (state.email == null || state.email.isBlank()) {
@@ -92,12 +93,12 @@ public class AgentOrchestrator {
 
         var existingBooking = bookingService.findAlreadyConfirmed(sessionId, quote, state.guestFullName, state.email);
         if (existingBooking.isPresent()) {
-            return new AgentResponse(
-                    sessionId,
-                    AgentStatus.BOOKING_CONFIRMED,
-                    existingBooking.get(),
+            String msg = serviceMessageFormatter.format(
+                    "booking_already_confirmed",
+                    existingBooking.get().toString(),
                     "Réservation déjà confirmée (idempotence)."
             );
+            return new AgentResponse(sessionId, AgentStatus.BOOKING_CONFIRMED, existingBooking.get(), msg);
         }
 
         if (!bookingService.claim(sessionId, quote, state.guestFullName, state.email)) {
@@ -115,12 +116,12 @@ public class AgentOrchestrator {
 
         stateStore.delete(sessionId);
 
-        return new AgentResponse(
-                sessionId,
-                AgentStatus.BOOKING_CONFIRMED,
-                bookingCreateResult.booking(),
+        String msg = serviceMessageFormatter.format(
+                "booking_confirmed",
+                bookingCreateResult.booking().toString(),
                 "Réservation confirmée et email envoyé."
         );
+        return new AgentResponse(sessionId, AgentStatus.BOOKING_CONFIRMED, bookingCreateResult.booking(), msg);
     }
 
     private String nextMissingQuestion(BookingRequestState s) {
@@ -131,28 +132,6 @@ public class AgentOrchestrator {
         if (s.guests == null || s.guests <= 0) return "Pour combien de personnes ?";
         if (isBlank(s.guestFullName)) return "Quel est ton nom complet (pour la réservation) ?";
         return null;
-    }
-
-    private String buildBookingIdempotencyKey(String sessionId, PricingResult quote, String guestFullName, String email) {
-        String fingerprint = String.join("|",
-                sessionId,
-                quote.quote().city(),
-                quote.quote().checkIn().toString(),
-                quote.quote().checkOut().toString(),
-                quote.quote().roomType().name(),
-                String.valueOf(quote.quote().guests()),
-                String.valueOf(quote.quote().total()),
-                guestFullName == null ? "" : guestFullName.trim().toLowerCase(),
-                email == null ? "" : email.trim().toLowerCase()
-        );
-
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(fingerprint.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (Exception e) {
-            throw new IllegalStateException("Impossible de calculer la clé d'idempotence", e);
-        }
     }
 
     private static boolean isBlank(String v) {
