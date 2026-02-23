@@ -115,6 +115,10 @@ export SMTP_HOST="smtp.gmail.com"
 export SMTP_PORT="587"
 export SMTP_USERNAME="votre@email.com"
 export SMTP_PASSWORD="mot_de_passe_app"
+
+export AMADEUS_API_KEY="..."
+export AMADEUS_API_SECRET="..."
+export AMADEUS_BASE_URL="https://test.api.amadeus.com"
 ```
 
 > Si vous n’avez pas de SMTP réel, l’application peut démarrer mais l’étape d’email peut échouer selon votre configuration.
@@ -135,6 +139,20 @@ mvn spring-boot:run
 
 Par défaut, l’API écoute sur :
 - `http://localhost:8080`
+
+---
+
+
+## 🌍 Intégration Amadeus Self-Service (Hotel APIs)
+
+L’agent peut utiliser Amadeus (environnement test) pour:
+- vérifier les disponibilités via `GET /v3/shopping/hotel-offers`;
+- créer une réservation via `POST /v1/booking/hotel-bookings`;
+- récupérer automatiquement le token OAuth2 via `POST /v1/security/oauth2/token`.
+
+Si `AMADEUS_API_KEY` / `AMADEUS_API_SECRET` ne sont pas fournis, l’application bascule sur le fallback local (inventaire en mémoire) pour continuer à fonctionner en mode démo.
+
+Les messages de retour des services disponibilité/devis/réservation sont reformulés par le LLM pour produire une réponse client plus naturelle.
 
 ---
 

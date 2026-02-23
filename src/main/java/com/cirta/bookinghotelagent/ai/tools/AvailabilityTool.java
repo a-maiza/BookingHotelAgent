@@ -1,8 +1,9 @@
 package com.cirta.bookinghotelagent.ai.tools;
 
 import com.cirta.bookinghotelagent.domain.AlternativeOffer;
-import com.cirta.bookinghotelagent.domain.result.AvailabilityCheckResult;
 import com.cirta.bookinghotelagent.domain.RoomType;
+import com.cirta.bookinghotelagent.domain.result.AvailabilityCheckResult;
+import com.cirta.bookinghotelagent.integration.AmadeusClient;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
 
@@ -14,9 +15,11 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class AvailabilityTool {
     private final Map<String, Integer> inventory = new ConcurrentHashMap<>();
+    private final AmadeusClient amadeusClient;
 
-    public AvailabilityTool() {
-        inventory.put("PARIS:DOUBLE", 0); // mets 0 pour tester les alternatives
+    public AvailabilityTool(AmadeusClient amadeusClient) {
+        this.amadeusClient = amadeusClient;
+        inventory.put("PARIS:DOUBLE", 0);
         inventory.put("PARIS:SUITE", 1);
         inventory.put("PARIS:SINGLE", 2);
         inventory.put("LYON:DOUBLE", 5);
@@ -45,19 +48,32 @@ public class AvailabilityTool {
                 );
             }
 
+            if (amadeusClient.enabled()) {
+                String cityCode = toCityCode(normalizedCity);
+                var offersJson = amadeusClient.searchHotelOffers(cityCode, checkInIso, checkOutIso, 1).orElse(null);
+                if (offersJson != null) {
+                    int available = offersJson.path("data").isArray() ? offersJson.path("data").size() : 0;
+                    if (available > 0) {
+                        return new AvailabilityCheckResult(
+                                AvailabilityCheckResult.Status.OK,
+                                "Disponibilités récupérées via Amadeus.",
+                                normalizedCity, checkIn, checkOut, normalizedRoom, available,
+                                List.of()
+                        );
+                    }
+                }
+            }
 
             int available = getAvailable(normalizedCity, normalizedRoom);
-
             if (available > 0) {
                 return new AvailabilityCheckResult(
                         AvailabilityCheckResult.Status.OK,
-                        "Disponibilité trouvée.",
+                        "Disponibilité trouvée (fallback local).",
                         normalizedCity, checkIn, checkOut, normalizedRoom, available,
                         List.of()
                 );
             }
 
-            // alternatives: autres roomTypes dans la même ville avec dispo > 0
             List<AlternativeOffer> alternatives = inventory.entrySet().stream()
                     .filter(e -> e.getKey().startsWith(normalizedCity + ":"))
                     .map(e -> Map.entry(e.getKey().split(":")[1], e.getValue()))
@@ -91,13 +107,14 @@ public class AvailabilityTool {
         return inventory.getOrDefault(key, 0);
     }
 
-    // utilisé par BookingTool
-    void decrementIfAvailable(String cityUpper, RoomType roomTypeUpper) {
-        String key = cityUpper + ":" + roomTypeUpper;
-        inventory.compute(key, (k, v) -> {
-            if (v == null || v <= 0) return 0;
-            return v - 1;
-        });
-        getAvailable(cityUpper, roomTypeUpper);
+    private String toCityCode(String city) {
+        if (city == null || city.isBlank()) {
+            return "PAR";
+        }
+        String upper = city.trim().toUpperCase();
+        if (upper.length() >= 3) {
+            return upper.substring(0, 3);
+        }
+        return (upper + "XXX").substring(0, 3);
     }
 }
