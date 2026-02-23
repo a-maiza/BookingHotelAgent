@@ -1,6 +1,6 @@
 package com.cirta.bookinghotelagent.ai.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
+
 import com.cirta.bookinghotelagent.domain.Booking;
 import com.cirta.bookinghotelagent.domain.Guest;
 import com.cirta.bookinghotelagent.domain.Quote;
@@ -9,6 +9,7 @@ import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.integration.AmadeusClient;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,7 +49,7 @@ public class BookingTool {
                         Math.max(1, quote.guests())
                 ).orElse(null);
 
-                if (offers != null && offers.path("data").isArray() && offers.path("data").size() > 0) {
+                if (offers != null && offers.path("data").isArray() && !offers.path("data").isEmpty()) {
                     String offerId = extractFirstOfferId(offers);
                     if (!offerId.isBlank()) {
                         String[] names = splitName(guestFullName);
