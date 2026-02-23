@@ -66,7 +66,7 @@ public class AmadeusClient {
         }
     }
 
-    public Optional<JsonNode> createHotelBooking(String offerId, String firstName, String lastName, String email) {
+    public Optional<JsonNode> createHotelBooking(String hotelOfferId, String firstName, String lastName, String email) {
         if (!enabled()) {
             return Optional.empty();
         }
@@ -75,35 +75,57 @@ public class AmadeusClient {
         String payload = """
                 {
                   "data": {
-                    "offerId": "%s",
+                    "type": "hotel-order",
                     "guests": [
                       {
-                        "name": {
-                          "title": "MR",
-                          "firstName": "%s",
-                          "lastName": "%s"
-                        },
-                        "contact": {
-                          "email": "%s"
-                        }
+                        "tid": 1,
+                        "title": "MR",
+                        "firstName": "%s",
+                        "lastName": "%s",
+                        "phone": "+33679278416",
+                        "email": "%s"
                       }
                     ],
-                    "payments": [
+                    "travelAgent": {
+                      "contact": {
+                        "email": "%s"
+                      }
+                    },
+                    "roomAssociations": [
                       {
-                        "method": "CREDIT_CARD",
-                        "card": {
+                        "guestReferences": [
+                          {
+                            "guestReference": "1"
+                          }
+                        ],
+                        "hotelOfferId": "%s"
+                      }
+                    ],
+                    "payment": {
+                      "method": "CREDIT_CARD",
+                      "paymentCard": {
+                        "paymentCardInfo": {
                           "vendorCode": "VI",
-                          "cardNumber": "4111111111111111",
-                          "expiryDate": "2026-01"
+                          "cardNumber": "4151289722471370",
+                          "expiryDate": "2026-08",
+                          "holderName": "%s %s"
                         }
                       }
-                    ]
+                    }
                   }
                 }
-                """.formatted(offerId, escape(firstName), escape(lastName), escape(email));
+                """.formatted(
+                        escape(firstName),
+                        escape(lastName),
+                        escape(email),
+                        escape(email),
+                        escape(hotelOfferId),
+                        escape(firstName),
+                        escape(lastName)
+                );
 
         String body = restClient.post()
-                .uri("/v1/booking/hotel-bookings")
+                .uri("/v2/booking/hotel-orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer " + token)
                 .body(payload)
@@ -113,7 +135,7 @@ public class AmadeusClient {
         try {
             return Optional.ofNullable(objectMapper.readTree(body));
         } catch (Exception e) {
-            throw new IllegalStateException("Réponse Amadeus invalide (hotel-bookings)", e);
+            throw new IllegalStateException("Réponse Amadeus invalide (hotel-orders)", e);
         }
     }
 
