@@ -1,6 +1,6 @@
 package com.cirta.bookinghotelagent.ai.structured;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
@@ -11,16 +11,18 @@ import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonSchema;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class BookingRequestParser {
     private final ChatModel model;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
 
     private final ResponseFormat responseFormat;
 
-    public BookingRequestParser(ChatModel model) {
+    public BookingRequestParser(ChatModel model, ObjectMapper mapper) {
         this.model = model;
+        this.mapper = mapper;
         this.responseFormat = buildResponseFormat();
     }
 

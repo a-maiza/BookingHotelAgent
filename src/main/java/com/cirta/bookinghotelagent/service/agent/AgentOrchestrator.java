@@ -66,7 +66,8 @@ public class AgentOrchestrator {
         }
 
         var availability = availabilityService.check(state);
-        if (availability.availableRooms() <= 0) {
+        Integer availableRooms = availability.availableRooms();
+        if (availableRooms == null || availableRooms <= 0) {
             String msg = serviceMessageFormatter.format(
                     "availability_no",
                     availability.toString(),

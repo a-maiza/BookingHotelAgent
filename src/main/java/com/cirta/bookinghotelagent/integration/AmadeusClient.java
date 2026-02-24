@@ -1,14 +1,17 @@
 package com.cirta.bookinghotelagent.integration;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 @Component
 public class AmadeusClient {
@@ -35,15 +38,20 @@ public class AmadeusClient {
         return apiKey != null && !apiKey.isBlank() && apiSecret != null && !apiSecret.isBlank();
     }
 
-    public Optional<JsonNode> searchHotelOffers(String cityCode, String checkInDate, String checkOutDate, int adults) {
+    public Optional<JsonNode> searchHotelOffersByCity(String cityCode, String checkInDate, String checkOutDate, int adults) {
         if (!enabled()) {
             return Optional.empty();
         }
 
         String token = getAccessToken();
+        String hotelIds = resolveHotelIds(cityCode, token);
+        if (hotelIds.isBlank()) {
+            return Optional.empty();
+        }
+
         String body = restClient.get()
                 .uri(uri -> uri.path("/v3/shopping/hotel-offers")
-                        .queryParam("cityCode", cityCode)
+                        .queryParam("hotelIds", hotelIds)
                         .queryParam("checkInDate", checkInDate)
                         .queryParam("checkOutDate", checkOutDate)
                         .queryParam("adults", adults)
@@ -59,7 +67,7 @@ public class AmadeusClient {
         }
     }
 
-    public Optional<JsonNode> createHotelBooking(String offerId, String firstName, String lastName, String email) {
+    public Optional<JsonNode> createHotelBooking(String hotelOfferId, String firstName, String lastName, String email) {
         if (!enabled()) {
             return Optional.empty();
         }
@@ -68,35 +76,57 @@ public class AmadeusClient {
         String payload = """
                 {
                   "data": {
-                    "offerId": "%s",
+                    "type": "hotel-order",
                     "guests": [
                       {
-                        "name": {
-                          "title": "MR",
-                          "firstName": "%s",
-                          "lastName": "%s"
-                        },
-                        "contact": {
-                          "email": "%s"
-                        }
+                        "tid": 1,
+                        "title": "MR",
+                        "firstName": "%s",
+                        "lastName": "%s",
+                        "phone": "+33679278416",
+                        "email": "%s"
                       }
                     ],
-                    "payments": [
+                    "travelAgent": {
+                      "contact": {
+                        "email": "%s"
+                      }
+                    },
+                    "roomAssociations": [
                       {
-                        "method": "CREDIT_CARD",
-                        "card": {
+                        "guestReferences": [
+                          {
+                            "guestReference": "1"
+                          }
+                        ],
+                        "hotelOfferId": "%s"
+                      }
+                    ],
+                    "payment": {
+                      "method": "CREDIT_CARD",
+                      "paymentCard": {
+                        "paymentCardInfo": {
                           "vendorCode": "VI",
-                          "cardNumber": "4111111111111111",
-                          "expiryDate": "2026-01"
+                          "cardNumber": "4151289722471370",
+                          "expiryDate": "2026-08",
+                          "holderName": "%s %s"
                         }
                       }
-                    ]
+                    }
                   }
                 }
-                """.formatted(offerId, escape(firstName), escape(lastName), escape(email));
+                """.formatted(
+                        escape(firstName),
+                        escape(lastName),
+                        escape(email),
+                        escape(email),
+                        escape(hotelOfferId),
+                        escape(firstName),
+                        escape(lastName)
+                );
 
         String body = restClient.post()
-                .uri("/v1/booking/hotel-bookings")
+                .uri("/v2/booking/hotel-orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer " + token)
                 .body(payload)
@@ -106,7 +136,33 @@ public class AmadeusClient {
         try {
             return Optional.ofNullable(objectMapper.readTree(body));
         } catch (Exception e) {
-            throw new IllegalStateException("Réponse Amadeus invalide (hotel-bookings)", e);
+            throw new IllegalStateException("Réponse Amadeus invalide (hotel-orders)", e);
+        }
+    }
+
+    private String resolveHotelIds(String cityCode, String token) {
+        String body = restClient.get()
+                .uri(uri -> uri.path("/v1/reference-data/locations/hotels/by-city")
+                        .queryParam("cityCode", cityCode)
+                        .build())
+                .header("Authorization", "Bearer " + token)
+                .retrieve()
+                .body(String.class);
+
+        try {
+            JsonNode json = objectMapper.readTree(body);
+            JsonNode data = json.path("data");
+            if (!data.isArray()) {
+                return "";
+            }
+
+            return StreamSupport.stream(data.spliterator(), false)
+                    .map(item -> item.path("hotelId").asText(""))
+                    .filter(id -> !id.isBlank())
+                    .limit(20)
+                    .collect(Collectors.joining(","));
+        } catch (Exception e) {
+            throw new IllegalStateException("Réponse Amadeus invalide (hotel by city)", e);
         }
     }
 

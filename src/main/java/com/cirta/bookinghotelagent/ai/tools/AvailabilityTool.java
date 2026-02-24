@@ -43,14 +43,14 @@ public class AvailabilityTool {
                 return new AvailabilityCheckResult(
                         AvailabilityCheckResult.Status.INVALID_INPUT,
                         "Dates invalides: checkOut doit être après checkIn.",
-                        city, checkIn, checkOut, normalizedRoom, null,
+                        city, checkIn, checkOut, normalizedRoom, 0,
                         List.of()
                 );
             }
 
             if (amadeusClient.enabled()) {
                 String cityCode = toCityCode(normalizedCity);
-                var offersJson = amadeusClient.searchHotelOffers(cityCode, checkInIso, checkOutIso, 1).orElse(null);
+                var offersJson = amadeusClient.searchHotelOffersByCity(cityCode, checkInIso, checkOutIso, 1).orElse(null);
                 if (offersJson != null) {
                     int available = offersJson.path("data").isArray() ? offersJson.path("data").size() : 0;
                     if (available > 0) {
@@ -96,7 +96,7 @@ public class AvailabilityTool {
             return new AvailabilityCheckResult(
                     AvailabilityCheckResult.Status.ERROR,
                     "Erreur lors de la vérification de disponibilité: " + ex.getMessage(),
-                    city, null, null, normalizedRoom, null,
+                    city, null, null, normalizedRoom, 0,
                     List.of()
             );
         }

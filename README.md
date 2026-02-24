@@ -146,8 +146,8 @@ Par défaut, l’API écoute sur :
 ## 🌍 Intégration Amadeus Self-Service (Hotel APIs)
 
 L’agent peut utiliser Amadeus (environnement test) pour:
-- vérifier les disponibilités via `GET /v3/shopping/hotel-offers`;
-- créer une réservation via `POST /v1/booking/hotel-bookings`;
+- vérifier les disponibilités via `GET /v1/reference-data/locations/hotels/by-city` puis `GET /v3/shopping/hotel-offers?hotelIds=...`;
+- créer une réservation via `POST /v2/booking/hotel-orders`;
 - récupérer automatiquement le token OAuth2 via `POST /v1/security/oauth2/token`.
 
 Si `AMADEUS_API_KEY` / `AMADEUS_API_SECRET` ne sont pas fournis, l’application bascule sur le fallback local (inventaire en mémoire) pour continuer à fonctionner en mode démo.

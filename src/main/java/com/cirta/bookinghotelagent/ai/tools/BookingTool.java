@@ -1,5 +1,6 @@
 package com.cirta.bookinghotelagent.ai.tools;
 
+
 import com.cirta.bookinghotelagent.domain.Booking;
 import com.cirta.bookinghotelagent.domain.Guest;
 import com.cirta.bookinghotelagent.domain.Quote;
@@ -8,6 +9,7 @@ import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.integration.AmadeusClient;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,15 +42,15 @@ public class BookingTool {
 
             if (amadeusClient.enabled()) {
                 String cityCode = toCityCode(quote.city());
-                var offers = amadeusClient.searchHotelOffers(
+                var offers = amadeusClient.searchHotelOffersByCity(
                         cityCode,
                         quote.checkIn().toString(),
                         quote.checkOut().toString(),
                         Math.max(1, quote.guests())
                 ).orElse(null);
 
-                if (offers != null && offers.path("data").isArray() && offers.path("data").size() > 0) {
-                    String offerId = offers.path("data").get(0).path("offerId").asText();
+                if (offers != null && offers.path("data").isArray() && !offers.path("data").isEmpty()) {
+                    String offerId = extractFirstOfferId(offers);
                     if (!offerId.isBlank()) {
                         String[] names = splitName(guestFullName);
                         amadeusClient.createHotelBooking(offerId, names[0], names[1], guestEmail);
@@ -83,6 +85,21 @@ public class BookingTool {
                     null
             );
         }
+    }
+
+    private static String extractFirstOfferId(JsonNode offersResponse) {
+        JsonNode data = offersResponse.path("data");
+        if (!data.isArray() || data.isEmpty()) {
+            return "";
+        }
+
+        JsonNode hotelNode = data.get(0);
+        JsonNode offers = hotelNode.path("offers");
+        if (!offers.isArray() || offers.isEmpty()) {
+            return "";
+        }
+
+        return offers.get(0).path("id").asText("");
     }
 
     private static String[] splitName(String fullName) {
