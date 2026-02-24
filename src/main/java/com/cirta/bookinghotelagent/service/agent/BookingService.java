@@ -36,6 +36,11 @@ public class BookingService {
         return bookingTool.createBooking(quote, guestFullName, email);
     }
 
+    public void releaseClaim(String sessionId, PricingResult quote, String guestFullName, String email) {
+        String key = buildBookingIdempotencyKey(sessionId, quote, guestFullName, email);
+        idempotencyStore.releaseClaim(key);
+    }
+
     public void markCompleted(String sessionId, PricingResult quote, String guestFullName, String email, Booking booking) {
         String key = buildBookingIdempotencyKey(sessionId, quote, guestFullName, email);
         idempotencyStore.markCompleted(key, booking);
