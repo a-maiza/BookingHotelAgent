@@ -43,31 +43,40 @@ public class BookingTool {
             String message = "Réservation créée.";
 
             if (amadeusClient.enabled()) {
-                String cityCode = toCityCode(quote.city());
-                var offers = amadeusClient.searchHotelOffersByCity(
-                        cityCode,
-                        quote.checkIn().toString(),
-                        quote.checkOut().toString(),
-                        Math.max(1, quote.guests())
-                ).orElse(null);
+                String offerId = quote.amadeusOfferId();
 
-                if (offers != null && offers.path("data").isArray() && offers.path("data").size() > 0) {
-                    String offerId = extractFirstOfferId(offers);
-                    if (!offerId.isBlank()) {
-                        String[] names = splitName(guestFullName);
-                        JsonNode orderResponse = amadeusClient
-                                .createHotelBooking(offerId, names[0], names[1], guestEmail)
-                                .orElse(null);
+                if (offerId == null || offerId.isBlank()) {
+                    String cityCode = toCityCode(quote.city());
+                    var offers = amadeusClient.searchHotelOffersByCity(
+                            cityCode,
+                            quote.checkIn().toString(),
+                            quote.checkOut().toString(),
+                            Math.max(1, quote.guests())
+                    ).orElse(null);
+                    if (offers != null && offers.path("data").isArray() && offers.path("data").size() > 0) {
+                        offerId = extractFirstOfferId(offers);
+                    }
+                }
 
-                        if (orderResponse != null) {
-                            booking = mapAmadeusOrderToBooking(orderResponse, quote, guestFullName, guestEmail);
-                            bookings.put(booking.bookingRef(), booking);
-                            return new BookingCreateResult(
-                                    BookingCreateResult.Status.OK,
-                                    "Réservation créée via Amadeus.",
-                                    booking
-                            );
-                        }
+                if (offerId != null && !offerId.isBlank()) {
+                    JsonNode repricedOffer = amadeusClient.getHotelOffer(offerId, "fr-FR").orElse(null);
+                    String repricedOfferId = repricedOffer != null
+                            ? repricedOffer.path("data").path("offer").path("id").asText(offerId)
+                            : offerId;
+
+                    String[] names = splitName(guestFullName);
+                    JsonNode orderResponse = amadeusClient
+                            .createHotelBooking(repricedOfferId, names[0], names[1], guestEmail)
+                            .orElse(null);
+
+                    if (orderResponse != null) {
+                        booking = mapAmadeusOrderToBooking(orderResponse, quote, guestFullName, guestEmail);
+                        bookings.put(booking.bookingRef(), booking);
+                        return new BookingCreateResult(
+                                BookingCreateResult.Status.OK,
+                                "Réservation créée via Amadeus.",
+                                booking
+                        );
                     }
                 }
                 message = "Réservation créée (fallback local, réponse Amadeus indisponible).";

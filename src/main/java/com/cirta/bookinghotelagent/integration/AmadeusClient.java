@@ -66,6 +66,30 @@ public class AmadeusClient {
         }
     }
 
+
+    public Optional<JsonNode> getHotelOffer(String offerId, String lang) {
+        if (!enabled() || offerId == null || offerId.isBlank()) {
+            return Optional.empty();
+        }
+
+        String token = getAccessToken();
+        String body = restClient.get()
+                .uri(uri -> {
+                    var builder = uri.path("/v3/shopping/hotel-offers/{offerId}")
+                            .queryParam("lang", (lang == null || lang.isBlank()) ? "fr-FR" : lang);
+                    return builder.build(offerId);
+                })
+                .header("Authorization", "Bearer " + token)
+                .retrieve()
+                .body(String.class);
+
+        try {
+            return Optional.ofNullable(objectMapper.readTree(body));
+        } catch (Exception e) {
+            throw new IllegalStateException("Réponse Amadeus invalide (hotel-offers/{offerId})", e);
+        }
+    }
+
     public Optional<JsonNode> createHotelBooking(String hotelOfferId, String firstName, String lastName, String email) {
         if (!enabled()) {
             return Optional.empty();
