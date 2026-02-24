@@ -62,6 +62,11 @@ public class BookingIdempotencyStore {
     }
 
     @Transactional
+    public void releaseClaim(String idempotencyKey) {
+        repository.deleteById(idempotencyKey);
+    }
+
+    @Transactional
     public void markCompleted(String idempotencyKey, Booking booking) {
         BookingIdempotencyEntity entity = repository.findById(idempotencyKey)
                 .orElseThrow(() -> new IllegalStateException("Idempotency key introuvable: " + idempotencyKey));

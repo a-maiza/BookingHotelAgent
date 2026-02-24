@@ -6,9 +6,9 @@ import com.cirta.bookinghotelagent.domain.Quote;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.integration.AmadeusClient;
-import com.fasterxml.jackson.databind.JsonNode;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDate;
 import java.util.concurrent.ConcurrentHashMap;

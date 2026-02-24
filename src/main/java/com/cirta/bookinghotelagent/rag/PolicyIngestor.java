@@ -104,7 +104,7 @@ public class PolicyIngestor implements ApplicationRunner {
                 create table if not exists rag_ingestion_state (
                     namespace text primary key,
                     content_hash text not null,
-                    updated_at timestamptz not null
+                    updated_at timestamp not null
                 )
                 """);
     }
