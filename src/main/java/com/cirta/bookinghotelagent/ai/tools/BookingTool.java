@@ -1,17 +1,16 @@
 package com.cirta.bookinghotelagent.ai.tools;
 
-
 import com.cirta.bookinghotelagent.domain.Booking;
 import com.cirta.bookinghotelagent.domain.Guest;
 import com.cirta.bookinghotelagent.domain.Quote;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.integration.AmadeusClient;
+import com.fasterxml.jackson.databind.JsonNode;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
 
-import java.util.UUID;
+import java.time.LocalDate;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -40,6 +39,9 @@ public class BookingTool {
             }
             Quote quote = pricingResult.quote();
 
+            Booking booking;
+            String message = "Réservation créée.";
+
             if (amadeusClient.enabled()) {
                 String cityCode = toCityCode(quote.city());
                 var offers = amadeusClient.searchHotelOffersByCity(
@@ -49,33 +51,33 @@ public class BookingTool {
                         Math.max(1, quote.guests())
                 ).orElse(null);
 
-                if (offers != null && offers.path("data").isArray() && !offers.path("data").isEmpty()) {
+                if (offers != null && offers.path("data").isArray() && offers.path("data").size() > 0) {
                     String offerId = extractFirstOfferId(offers);
                     if (!offerId.isBlank()) {
                         String[] names = splitName(guestFullName);
-                        amadeusClient.createHotelBooking(offerId, names[0], names[1], guestEmail);
+                        JsonNode orderResponse = amadeusClient
+                                .createHotelBooking(offerId, names[0], names[1], guestEmail)
+                                .orElse(null);
+
+                        if (orderResponse != null) {
+                            booking = mapAmadeusOrderToBooking(orderResponse, quote, guestFullName, guestEmail);
+                            bookings.put(booking.bookingRef(), booking);
+                            return new BookingCreateResult(
+                                    BookingCreateResult.Status.OK,
+                                    "Réservation créée via Amadeus.",
+                                    booking
+                            );
+                        }
                     }
                 }
+                message = "Réservation créée (fallback local, réponse Amadeus indisponible).";
             }
 
-            String ref = "BK-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-            Guest guest = new Guest(guestFullName, guestEmail);
-
-            Booking booking = new Booking(
-                    ref,
-                    quote.city(),
-                    quote.checkIn(),
-                    quote.checkOut(),
-                    quote.roomType(),
-                    quote.guests(),
-                    quote.total(),
-                    guest
-            );
-
-            bookings.put(ref, booking);
+            booking = buildLocalBooking(quote, guestFullName, guestEmail);
+            bookings.put(booking.bookingRef(), booking);
             return new BookingCreateResult(
                     BookingCreateResult.Status.OK,
-                    "Réservation créée.",
+                    message,
                     booking
             );
         } catch (Exception ex) {
@@ -85,6 +87,60 @@ public class BookingTool {
                     null
             );
         }
+    }
+
+    private Booking mapAmadeusOrderToBooking(JsonNode orderResponse,
+                                             Quote fallbackQuote,
+                                             String guestFullName,
+                                             String guestEmail) {
+        JsonNode data = orderResponse.path("data");
+
+        String bookingRef = textOrFallback(
+                data.path("id").asText(null),
+                data.path("associatedRecords").isArray() && !data.path("associatedRecords").isEmpty()
+                        ? data.path("associatedRecords").get(0).path("reference").asText(null)
+                        : null,
+                localRefFallback()
+        );
+
+        String city = textOrFallback(
+                data.path("hotel").path("address").path("cityName").asText(null),
+                fallbackQuote.city()
+        );
+
+        LocalDate checkIn = parseDateOrFallback(data.path("checkInDate").asText(null), fallbackQuote.checkIn());
+        LocalDate checkOut = parseDateOrFallback(data.path("checkOutDate").asText(null), fallbackQuote.checkOut());
+
+        double totalPrice = doubleOrFallback(
+                data.path("price").path("total").asDouble(Double.NaN),
+                fallbackQuote.total()
+        );
+
+        Guest guest = new Guest(guestFullName, guestEmail);
+
+        return new Booking(
+                bookingRef,
+                city,
+                checkIn,
+                checkOut,
+                fallbackQuote.roomType(),
+                fallbackQuote.guests(),
+                totalPrice,
+                guest
+        );
+    }
+
+    private Booking buildLocalBooking(Quote quote, String guestFullName, String guestEmail) {
+        return new Booking(
+                localRefFallback(),
+                quote.city(),
+                quote.checkIn(),
+                quote.checkOut(),
+                quote.roomType(),
+                quote.guests(),
+                quote.total(),
+                new Guest(guestFullName, guestEmail)
+        );
     }
 
     private static String extractFirstOfferId(JsonNode offersResponse) {
@@ -111,6 +167,42 @@ public class BookingTool {
             return new String[]{parts[0], "Client"};
         }
         return parts;
+    }
+
+    private static String textOrFallback(String primary, String fallback) {
+        if (primary != null && !primary.isBlank()) {
+            return primary;
+        }
+        return fallback;
+    }
+
+    private static String textOrFallback(String primary, String secondary, String fallback) {
+        if (primary != null && !primary.isBlank()) {
+            return primary;
+        }
+        if (secondary != null && !secondary.isBlank()) {
+            return secondary;
+        }
+        return fallback;
+    }
+
+    private static LocalDate parseDateOrFallback(String value, LocalDate fallback) {
+        try {
+            if (value == null || value.isBlank()) {
+                return fallback;
+            }
+            return LocalDate.parse(value);
+        } catch (Exception ex) {
+            return fallback;
+        }
+    }
+
+    private static double doubleOrFallback(double candidate, double fallback) {
+        return Double.isNaN(candidate) ? fallback : candidate;
+    }
+
+    private static String localRefFallback() {
+        return "BK-" + java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
     private String toCityCode(String city) {
