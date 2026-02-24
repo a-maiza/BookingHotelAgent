@@ -5,6 +5,7 @@ import com.cirta.bookinghotelagent.ai.structured.BookingRequestState;
 import com.cirta.bookinghotelagent.api.AgentResponse;
 import com.cirta.bookinghotelagent.api.AgentStatus;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
+import com.cirta.bookinghotelagent.domain.result.EmailSendResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.rag.PolicyRetriever;
 import com.cirta.bookinghotelagent.service.BookingSessionStateStore;
@@ -91,7 +92,17 @@ public class AgentOrchestrator {
             return new AgentResponse(sessionId, AgentStatus.EMAIL_REQUIRED, quote, "Veuillez fournir un email pour confirmer.");
         }
 
-        var existingBooking = bookingService.findAlreadyConfirmed(sessionId, quote, state.guestFullName, state.email);
+        PricingResult bookingQuote = pricingService.quote(state);
+        if (bookingQuote.status() != PricingResult.Status.OK || bookingQuote.quote() == null) {
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.ERROR,
+                    quote,
+                    "Impossible de confirmer la réservation maintenant. Merci de relancer un devis puis de réessayer. Détail: " + bookingQuote.message()
+            );
+        }
+
+        var existingBooking = bookingService.findAlreadyConfirmed(sessionId, bookingQuote, state.guestFullName, state.email);
         if (existingBooking.isPresent()) {
             String msg = serviceMessageFormatter.format(
                     "booking_already_confirmed",
@@ -101,7 +112,7 @@ public class AgentOrchestrator {
             return new AgentResponse(sessionId, AgentStatus.BOOKING_CONFIRMED, existingBooking.get(), msg);
         }
 
-        if (!bookingService.claim(sessionId, quote, state.guestFullName, state.email)) {
+        if (!bookingService.claim(sessionId, bookingQuote, state.guestFullName, state.email)) {
             return new AgentResponse(
                     sessionId,
                     AgentStatus.ERROR,
@@ -110,16 +121,30 @@ public class AgentOrchestrator {
             );
         }
 
-        BookingCreateResult bookingCreateResult = bookingService.create(quote, state.guestFullName, state.email);
-        emailService.sendBookingConfirmation(bookingCreateResult.booking());
-        bookingService.markCompleted(sessionId, quote, state.guestFullName, state.email, bookingCreateResult.booking());
+        BookingCreateResult bookingCreateResult = bookingService.create(bookingQuote, state.guestFullName, state.email);
+        if (bookingCreateResult.status() != BookingCreateResult.Status.OK || bookingCreateResult.booking() == null) {
+            bookingService.releaseClaim(sessionId, bookingQuote, state.guestFullName, state.email);
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.ERROR,
+                    bookingQuote,
+                    "Réservation non confirmée. " + bookingCreateResult.message() + " Si vous utilisez Amadeus, il peut être nécessaire de refaire un devis juste avant la confirmation."
+            );
+        }
+
+        EmailSendResult emailSendResult = emailService.sendBookingConfirmation(bookingCreateResult.booking());
+        bookingService.markCompleted(sessionId, bookingQuote, state.guestFullName, state.email, bookingCreateResult.booking());
 
         stateStore.delete(sessionId);
+
+        String fallback = emailSendResult.status() == EmailSendResult.Status.OK
+                ? "Réservation confirmée et email envoyé."
+                : "Réservation confirmée, mais l'email de confirmation n'a pas pu être envoyé: " + emailSendResult.message();
 
         String msg = serviceMessageFormatter.format(
                 "booking_confirmed",
                 bookingCreateResult.booking().toString(),
-                "Réservation confirmée et email envoyé."
+                fallback
         );
         return new AgentResponse(sessionId, AgentStatus.BOOKING_CONFIRMED, bookingCreateResult.booking(), msg);
     }
