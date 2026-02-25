@@ -1,9 +1,13 @@
 package com.cirta.bookinghotelagent.repo;
 
+
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.time.Instant;
 
+@Getter
 @Entity
 @Table(name = "booking_session_state")
 public class BookingSessionStateEntity {
@@ -11,14 +15,14 @@ public class BookingSessionStateEntity {
     @Column(name = "session_id", nullable = false, length = 120)
     private String sessionId;
 
+    @Setter
     @Lob
     @Column(name = "state_json", nullable = false)
     private String stateJson;
 
+    @Setter
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
-
-    protected BookingSessionStateEntity() {}
 
     public BookingSessionStateEntity(String sessionId, String stateJson, Instant updatedAt) {
         this.sessionId = sessionId;
@@ -26,10 +30,4 @@ public class BookingSessionStateEntity {
         this.updatedAt = updatedAt;
     }
 
-    public String getSessionId() { return sessionId; }
-    public String getStateJson() { return stateJson; }
-    public Instant getUpdatedAt() { return updatedAt; }
-
-    public void setStateJson(String stateJson) { this.stateJson = stateJson; }
-    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }
