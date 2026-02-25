@@ -6,6 +6,7 @@ import com.cirta.bookinghotelagent.domain.result.AvailabilityCheckResult;
 import com.cirta.bookinghotelagent.integration.AmadeusClient;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -52,13 +53,13 @@ public class AvailabilityTool {
                 String cityCode = toCityCode(normalizedCity);
                 var offersJson = amadeusClient.searchHotelOffersByCity(cityCode, checkInIso, checkOutIso, 1).orElse(null);
                 if (offersJson != null) {
-                    int available = offersJson.path("data").isArray() ? offersJson.path("data").size() : 0;
-                    if (available > 0) {
+                    List<AlternativeOffer> offers = extractOfferOptions(offersJson);
+                    if (!offers.isEmpty()) {
                         return new AvailabilityCheckResult(
                                 AvailabilityCheckResult.Status.OK,
-                                "Disponibilités récupérées via Amadeus.",
-                                normalizedCity, checkIn, checkOut, normalizedRoom, available,
-                                List.of()
+                                "Disponibilités Amadeus trouvées. Merci de choisir un offerId.",
+                                normalizedCity, checkIn, checkOut, normalizedRoom, offers.size(),
+                                offers
                         );
                     }
                 }
@@ -78,7 +79,15 @@ public class AvailabilityTool {
                     .filter(e -> e.getKey().startsWith(normalizedCity + ":"))
                     .map(e -> Map.entry(e.getKey().split(":")[1], e.getValue()))
                     .filter(e -> e.getValue() != null && e.getValue() > 0)
-                    .map(e -> new AlternativeOffer(e.getKey(), e.getValue(), "Alternative disponible à " + normalizedCity))
+                    .map(e -> new AlternativeOffer(
+                            null,
+                            e.getKey(),
+                            e.getValue(),
+                            null,
+                            null,
+                            null,
+                            "Alternative disponible à " + normalizedCity
+                    ))
                     .toList();
 
             String msg = alternatives.isEmpty()
@@ -99,6 +108,62 @@ public class AvailabilityTool {
                     city, null, null, normalizedRoom, 0,
                     List.of()
             );
+        }
+    }
+
+    private List<AlternativeOffer> extractOfferOptions(JsonNode offersJson) {
+        JsonNode hotels = offersJson.path("data");
+        if (!hotels.isArray()) {
+            return List.of();
+        }
+
+        java.util.ArrayList<AlternativeOffer> out = new java.util.ArrayList<>();
+        for (JsonNode hotel : hotels) {
+            String hotelName = hotel.path("hotel").path("name").asText("");
+            JsonNode offers = hotel.path("offers");
+            if (!offers.isArray()) {
+                continue;
+            }
+            for (JsonNode offer : offers) {
+                String offerId = offer.path("id").asText("");
+                if (offerId.isBlank()) {
+                    continue;
+                }
+                Double total = parseAmount(offer.path("price").path("total"));
+                String currency = offer.path("price").path("currency").asText(null);
+                String board = offer.path("boardType").asText("N/A");
+                out.add(new AlternativeOffer(
+                        offerId,
+                        "N/A",
+                        1,
+                        hotelName.isBlank() ? null : hotelName,
+                        total,
+                        currency,
+                        "Plan: " + board
+                ));
+                if (out.size() >= 10) {
+                    return out;
+                }
+            }
+        }
+        return out;
+    }
+
+    private static Double parseAmount(JsonNode amountNode) {
+        if (amountNode == null || amountNode.isMissingNode() || amountNode.isNull()) {
+            return null;
+        }
+        if (amountNode.isNumber()) {
+            return amountNode.asDouble();
+        }
+        String text = amountNode.asText("").trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(text);
+        } catch (Exception ex) {
+            return null;
         }
     }
 

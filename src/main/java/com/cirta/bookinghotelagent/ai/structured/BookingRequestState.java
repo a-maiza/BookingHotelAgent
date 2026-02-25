@@ -12,6 +12,7 @@ public class BookingRequestState {
     public String guestFullName;
     public String email;
     public boolean wantsToBookNow;
+    public String selectedOfferId;
 
     public BookingRequestState merge(BookingRequestDraft d) {
         if (d == null) return this;
@@ -23,6 +24,7 @@ public class BookingRequestState {
         if (notBlank(d.guestFullName())) this.guestFullName = d.guestFullName().trim();
         if (notBlank(d.email())) this.email = d.email().trim();
         if (d.wantsToBookNow() != null) this.wantsToBookNow = d.wantsToBookNow();
+        if (notBlank(d.selectedOfferId())) this.selectedOfferId = d.selectedOfferId().trim();
 
         if (notBlank(d.checkIn())) this.checkIn = LocalDate.parse(d.checkIn().trim());
         if (notBlank(d.checkOut())) this.checkOut = LocalDate.parse(d.checkOut().trim());

@@ -28,5 +28,8 @@ public record BookingRequestDraft(
         String email,
 
         @Description("Vrai si l'utilisateur demande explicitement de réserver maintenant (ex: 'réserve', 'confirme')")
-        Boolean wantsToBookNow
+        Boolean wantsToBookNow,
+
+        @Description("Identifiant d'offre Amadeus choisi par l'utilisateur (optionnel)")
+        String selectedOfferId
 ) {}

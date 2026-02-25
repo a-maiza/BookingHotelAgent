@@ -27,7 +27,7 @@ public class PricingTool {
     - INVALID_INPUT si dates invalides ou paramètres incohérents
     - ERROR si erreur inattendue
     """)
-    public PricingResult quote(String city, String roomType, int guests, String checkInIso, String checkOutIso, double targetBudgetPerNight) {
+    public PricingResult quote(String city, String roomType, int guests, String checkInIso, String checkOutIso, double targetBudgetPerNight, String selectedOfferId) {
         try {
             if (city == null || city.isBlank()) {
                 return new PricingResult(PricingResult.Status.INVALID_INPUT, "Ville manquante.", null);
@@ -51,7 +51,7 @@ public class PricingTool {
             RoomType rt = RoomType.valueOf(roomType.toUpperCase(Locale.ROOT));
 
             if (amadeusClient.enabled()) {
-                PricingResult amadeusResult = quoteViaAmadeus(city, rt, guests, checkInIso, checkOutIso, targetBudgetPerNight, checkIn, checkOut, nights);
+                PricingResult amadeusResult = quoteViaAmadeus(city, rt, guests, checkInIso, checkOutIso, targetBudgetPerNight, checkIn, checkOut, nights, selectedOfferId);
                 if (amadeusResult != null) {
                     return amadeusResult;
                 }
@@ -94,7 +94,16 @@ public class PricingTool {
                                           double targetBudgetPerNight,
                                           LocalDate checkIn,
                                           LocalDate checkOut,
-                                          long nights) {
+                                          long nights,
+                                          String selectedOfferId) {
+        if (selectedOfferId != null && !selectedOfferId.isBlank()) {
+            JsonNode selectedOfferJson = amadeusClient.getHotelOffer(selectedOfferId, "fr-FR").orElse(null);
+            PricingResult selected = buildPricingResultFromOfferJson(city, roomType, guests, checkIn, checkOut, nights, selectedOfferId, selectedOfferJson);
+            if (selected != null) {
+                return selected;
+            }
+        }
+
         JsonNode offersJson = amadeusClient.searchHotelOffersByCity(toCityCode(city), checkInIso, checkOutIso, Math.max(1, guests))
                 .orElse(null);
         if (offersJson == null) {
@@ -111,9 +120,37 @@ public class PricingTool {
             return null;
         }
 
+        PricingResult fromCandidate = buildPricingResultFromOfferJson(
+                city,
+                roomType,
+                guests,
+                checkIn,
+                checkOut,
+                nights,
+                candidate.offerId,
+                pricedOfferJson
+        );
+        if (fromCandidate != null) {
+            return fromCandidate;
+        }
+        return null;
+    }
+
+    private PricingResult buildPricingResultFromOfferJson(String city,
+                                                         RoomType roomType,
+                                                         int guests,
+                                                         LocalDate checkIn,
+                                                         LocalDate checkOut,
+                                                         long nights,
+                                                         String fallbackOfferId,
+                                                         JsonNode pricedOfferJson) {
+        if (pricedOfferJson == null) {
+            return null;
+        }
+
         JsonNode offer = pricedOfferJson.path("data").path("offer");
-        String offerId = offer.path("id").asText(candidate.offerId);
-        double total = parseAmount(offer.path("price").path("total"), candidate.totalAmount);
+        String offerId = offer.path("id").asText(fallbackOfferId);
+        double total = parseAmount(offer.path("price").path("total"), -1);
         if (total <= 0) {
             return null;
         }
@@ -132,7 +169,6 @@ public class PricingTool {
                 total,
                 offerId
         );
-
         return new PricingResult(PricingResult.Status.OK, "Devis calculé via Amadeus (offer re-pricée).", quote);
     }
 
