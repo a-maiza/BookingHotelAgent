@@ -21,7 +21,8 @@ public class PricingService {
                 state.guests,
                 state.checkIn.toString(),
                 state.checkOut.toString(),
-                budget
+                budget,
+                state.selectedOfferId
         );
     }
 }

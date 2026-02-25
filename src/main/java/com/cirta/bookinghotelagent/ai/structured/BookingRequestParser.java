@@ -45,6 +45,7 @@ public class BookingRequestParser {
         - Budget par nuit
         - Email du client
         - Si l'utilisateur veut réserver immédiatement
+        - Identifiant d'offre choisi par l'utilisateur (offerId) si présent
         
         Règles STRICTES :
         - Ne jamais inventer d'information.
@@ -86,6 +87,7 @@ public class BookingRequestParser {
                                 .addStringProperty("guestFullName")
                                 .addStringProperty("email")
                                 .addBooleanProperty("wantsToBookNow")
+                                .addStringProperty("selectedOfferId")
                                 .build()
                 )
                 .build();

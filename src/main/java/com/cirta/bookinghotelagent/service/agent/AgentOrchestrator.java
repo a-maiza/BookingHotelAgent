@@ -77,6 +77,16 @@ public class AgentOrchestrator {
             return new AgentResponse(sessionId, AgentStatus.NO_AVAILABILITY, availability, msg);
         }
 
+
+        if (needsOfferSelection(state, availability)) {
+            return new AgentResponse(
+                    sessionId,
+                    AgentStatus.OFFER_SELECTION_REQUIRED,
+                    availability,
+                    "J'ai trouvé des offres Amadeus. Donnez-moi l'offerId qui vous convient (ex: OFF123)."
+            );
+        }
+
         PricingResult quote = pricingService.quote(state);
 
         if (!state.wantsToBookNow) {
@@ -157,6 +167,12 @@ public class AgentOrchestrator {
         if (s.guests == null || s.guests <= 0) return "Pour combien de personnes ?";
         if (isBlank(s.guestFullName)) return "Quel est ton nom complet (pour la réservation) ?";
         return null;
+    }
+
+    private boolean needsOfferSelection(BookingRequestState state, com.cirta.bookinghotelagent.domain.result.AvailabilityCheckResult availability) {
+        return (state.selectedOfferId == null || state.selectedOfferId.isBlank())
+                && availability.alternatives() != null
+                && availability.alternatives().stream().anyMatch(o -> o.offerId() != null && !o.offerId().isBlank());
     }
 
     private static boolean isBlank(String v) {

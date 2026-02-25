@@ -209,6 +209,7 @@ curl -X POST http://localhost:8080/api/agent/chat \
 - `MISSING_INFO`
 - `INVALID_DATES`
 - `NO_AVAILABILITY`
+- `OFFER_SELECTION_REQUIRED`
 - `QUOTE_READY`
 - `EMAIL_REQUIRED`
 - `BOOKING_CONFIRMED`
@@ -279,3 +280,9 @@ curl -X POST http://localhost:8080/api/agent/chat \
     "message": "C'est quoi les règles de check-in/check-out ?"
   }'
 ```
+
+
+### 🧩 Choisir une offre Amadeus
+
+Quand des offres Amadeus sont trouvées, l'API peut renvoyer `status = OFFER_SELECTION_REQUIRED` avec la liste d'`offerId` dans le payload disponibilité.
+Ensuite, envoie un message contenant l'`offerId` choisi (ex: `Je choisis l'offre XXX`) pour que le devis et la réservation utilisent cette même offre.
