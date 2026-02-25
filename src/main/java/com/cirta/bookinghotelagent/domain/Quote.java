@@ -10,6 +10,7 @@ public record Quote(
         int guests,
         double pricePerNight,
         double taxes,
-        double total
+        double total,
+        String amadeusOfferId
 ) {
 }

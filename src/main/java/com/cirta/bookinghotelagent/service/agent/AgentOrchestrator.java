@@ -92,7 +92,7 @@ public class AgentOrchestrator {
             return new AgentResponse(sessionId, AgentStatus.EMAIL_REQUIRED, quote, "Veuillez fournir un email pour confirmer.");
         }
 
-        PricingResult bookingQuote = pricingService.quote(state);
+        PricingResult bookingQuote = quote;
         if (bookingQuote.status() != PricingResult.Status.OK || bookingQuote.quote() == null) {
             return new AgentResponse(
                     sessionId,
