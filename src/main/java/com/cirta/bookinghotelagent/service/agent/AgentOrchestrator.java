@@ -77,27 +77,26 @@ public class AgentOrchestrator {
             return new AgentResponse(sessionId, AgentStatus.NO_AVAILABILITY, availability, msg);
         }
 
-        PricingResult quote = pricingService.quote(state);
+        PricingResult bookingQuote = pricingService.quote(state);
 
         if (!state.wantsToBookNow) {
             String msg = serviceMessageFormatter.format(
                     "quote_ready",
-                    quote.toString(),
+                    bookingQuote.toString(),
                     "Voici votre devis. Confirmez-vous la réservation ?"
             );
-            return new AgentResponse(sessionId, AgentStatus.QUOTE_READY, quote, msg);
+            return new AgentResponse(sessionId, AgentStatus.QUOTE_READY, bookingQuote, msg);
         }
 
         if (state.email == null || state.email.isBlank()) {
-            return new AgentResponse(sessionId, AgentStatus.EMAIL_REQUIRED, quote, "Veuillez fournir un email pour confirmer.");
+            return new AgentResponse(sessionId, AgentStatus.EMAIL_REQUIRED, bookingQuote, "Veuillez fournir un email pour confirmer.");
         }
 
-        PricingResult bookingQuote = pricingService.quote(state);
         if (bookingQuote.status() != PricingResult.Status.OK || bookingQuote.quote() == null) {
             return new AgentResponse(
                     sessionId,
                     AgentStatus.ERROR,
-                    quote,
+                    bookingQuote,
                     "Impossible de confirmer la réservation maintenant. Merci de relancer un devis puis de réessayer. Détail: " + bookingQuote.message()
             );
         }

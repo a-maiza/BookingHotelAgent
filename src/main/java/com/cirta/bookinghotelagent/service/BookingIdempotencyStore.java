@@ -55,12 +55,6 @@ public class BookingIdempotencyStore {
         }
     }
 
-
-    @Transactional
-    public void releaseClaim(String idempotencyKey) {
-        repository.deleteById(idempotencyKey);
-    }
-
     @Transactional
     public void releaseClaim(String idempotencyKey) {
         repository.deleteById(idempotencyKey);
