@@ -24,6 +24,9 @@ public class BookingSessionStateEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    public BookingSessionStateEntity() {
+    }
+
     public BookingSessionStateEntity(String sessionId, String stateJson, Instant updatedAt) {
         this.sessionId = sessionId;
         this.stateJson = stateJson;
