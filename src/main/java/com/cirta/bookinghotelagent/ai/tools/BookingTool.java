@@ -6,39 +6,63 @@ import com.cirta.bookinghotelagent.domain.Quote;
 import com.cirta.bookinghotelagent.domain.result.BookingCreateResult;
 import com.cirta.bookinghotelagent.domain.result.PricingResult;
 import com.cirta.bookinghotelagent.integration.AmadeusClient;
+import com.cirta.bookinghotelagent.service.BookingIdempotencyStore;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.util.HexFormat;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 @Component
 public class BookingTool {
     private final AmadeusClient amadeusClient;
+    private final BookingIdempotencyStore idempotencyStore;
     private final ConcurrentMap<String, Booking> bookings = new ConcurrentHashMap<>();
 
-    public BookingTool(AmadeusClient amadeusClient) {
+    public BookingTool(AmadeusClient amadeusClient, BookingIdempotencyStore idempotencyStore) {
         this.amadeusClient = amadeusClient;
+        this.idempotencyStore = idempotencyStore;
     }
 
     @Tool("""
     Crée une réservation à partir d'un devis (quote) et d'un email.
     IMPORTANT: le Quote doit provenir d'un PricingToolResult avec status OK.
     Retourne BookingCreateResult. Ne pas inventer de bookingRef.
+    Gère automatiquement l'idempotence pour éviter les doubles réservations.
     """)
     public BookingCreateResult createBooking(PricingResult pricingResult, String guestFullName, String guestEmail) {
-        try {
-            if (guestEmail == null || guestEmail.isBlank() || !guestEmail.contains("@")) {
-                return new BookingCreateResult(
-                        BookingCreateResult.Status.INVALID_INPUT,
-                        "Email client invalide.",
-                        null
-                );
-            }
-            Quote quote = pricingResult.quote();
+        if (guestEmail == null || guestEmail.isBlank() || !guestEmail.contains("@")) {
+            return new BookingCreateResult(BookingCreateResult.Status.INVALID_INPUT, "Email client invalide.", null);
+        }
+        Quote quote = pricingResult.quote();
+        String idempotencyKey = buildIdempotencyKey(quote, guestFullName, guestEmail);
 
+        Optional<Booking> existing = idempotencyStore.findCompletedBooking(idempotencyKey);
+        if (existing.isPresent()) {
+            return new BookingCreateResult(BookingCreateResult.Status.OK, "Réservation déjà confirmée (idempotence).", existing.get());
+        }
+        if (!idempotencyStore.claim(idempotencyKey)) {
+            return new BookingCreateResult(BookingCreateResult.Status.ERROR, "Une demande de réservation identique est déjà en cours de traitement.", null);
+        }
+
+        BookingCreateResult result = doCreateBooking(pricingResult, guestFullName, guestEmail);
+        if (result.status() == BookingCreateResult.Status.OK && result.booking() != null) {
+            idempotencyStore.markCompleted(idempotencyKey, result.booking());
+        } else {
+            idempotencyStore.releaseClaim(idempotencyKey);
+        }
+        return result;
+    }
+
+    private BookingCreateResult doCreateBooking(PricingResult pricingResult, String guestFullName, String guestEmail) {
+        try {
+            Quote quote = pricingResult.quote();
             Booking booking;
             String message = "Réservation créée.";
 
@@ -72,11 +96,7 @@ public class BookingTool {
                     if (orderResponse != null) {
                         booking = mapAmadeusOrderToBooking(orderResponse, quote, guestFullName, guestEmail);
                         bookings.put(booking.bookingRef(), booking);
-                        return new BookingCreateResult(
-                                BookingCreateResult.Status.OK,
-                                "Réservation créée via Amadeus.",
-                                booking
-                        );
+                        return new BookingCreateResult(BookingCreateResult.Status.OK, "Réservation créée via Amadeus.", booking);
                     }
                 }
                 message = "Réservation créée (fallback local, réponse Amadeus indisponible).";
@@ -84,17 +104,29 @@ public class BookingTool {
 
             booking = buildLocalBooking(quote, guestFullName, guestEmail);
             bookings.put(booking.bookingRef(), booking);
-            return new BookingCreateResult(
-                    BookingCreateResult.Status.OK,
-                    message,
-                    booking
-            );
+            return new BookingCreateResult(BookingCreateResult.Status.OK, message, booking);
         } catch (Exception ex) {
-            return new BookingCreateResult(
-                    BookingCreateResult.Status.ERROR,
-                    "Erreur création réservation: " + ex.getMessage(),
-                    null
-            );
+            return new BookingCreateResult(BookingCreateResult.Status.ERROR, "Erreur création réservation: " + ex.getMessage(), null);
+        }
+    }
+
+    private String buildIdempotencyKey(Quote quote, String guestFullName, String guestEmail) {
+        String fingerprint = String.join("|",
+                quote.city(),
+                quote.checkIn().toString(),
+                quote.checkOut().toString(),
+                quote.roomType().name(),
+                String.valueOf(quote.guests()),
+                String.valueOf(quote.total()),
+                guestFullName == null ? "" : guestFullName.trim().toLowerCase(),
+                guestEmail == null ? "" : guestEmail.trim().toLowerCase()
+        );
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(fingerprint.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("Impossible de calculer la clé d'idempotence", e);
         }
     }
 
