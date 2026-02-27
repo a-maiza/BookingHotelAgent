@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: booking-agent-config
+  namespace: booking-agent
+data:
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres-service:5432/bookinghotel"
+  SPRING_DATASOURCE_USERNAME: "user"
+  RAG_PGVECTOR_HOST: "postgres-service"
+  RAG_PGVECTOR_PORT: "5432"
+  RAG_PGVECTOR_DB: "bookinghotel"
+  RAG_PGVECTOR_USER: "user"
+  RAG_PGVECTOR_TABLE: "policy_embeddings"
+  AMADEUS_BASE_URL: "https://test.api.amadeus.com"
+  SMTP_PORT: "587"

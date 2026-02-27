@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: booking-agent
+  namespace: booking-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: booking-agent
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: booking-agent
+    spec:
+      containers:
+        - name: booking-agent
+          image: ghcr.io/a-maiza/bookinghotelagent:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: booking-agent-config
+            - secretRef:
+                name: booking-agent-secrets
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 500m

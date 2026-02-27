@@ -1,0 +1,164 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: bookinghotel
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d bookinghotel"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: Run tests
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/bookinghotel
+          SPRING_DATASOURCE_USERNAME: user
+          SPRING_DATASOURCE_PASSWORD: password
+          RAG_PGVECTOR_HOST: localhost
+          RAG_PGVECTOR_PORT: "5432"
+          RAG_PGVECTOR_DB: bookinghotel
+          RAG_PGVECTOR_USER: user
+          RAG_PGVECTOR_PASSWORD: password
+          OPENAI_API_KEY: dummy
+        run: mvn verify -B
+
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: Build JAR
+        run: mvn clean package -DskipTests -B
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Inject secrets into k8s/app/secret.yaml
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          AMADEUS_API_KEY: ${{ secrets.AMADEUS_API_KEY }}
+          AMADEUS_API_SECRET: ${{ secrets.AMADEUS_API_SECRET }}
+        run: |
+          kubectl create secret generic booking-agent-secrets \
+            --namespace=booking-agent \
+            --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --from-literal=SPRING_DATASOURCE_PASSWORD="$DB_PASSWORD" \
+            --from-literal=RAG_PGVECTOR_PASSWORD="$DB_PASSWORD" \
+            --from-literal=SMTP_HOST="$SMTP_HOST" \
+            --from-literal=SMTP_USERNAME="$SMTP_USERNAME" \
+            --from-literal=SMTP_PASSWORD="$SMTP_PASSWORD" \
+            --from-literal=AMADEUS_API_KEY="$AMADEUS_API_KEY" \
+            --from-literal=AMADEUS_API_SECRET="$AMADEUS_API_SECRET" \
+            --save-config \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+      - name: Inject postgres secret
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          kubectl create secret generic postgres-secret \
+            --namespace=booking-agent \
+            --from-literal=POSTGRES_PASSWORD="$DB_PASSWORD" \
+            --save-config \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+      - name: Set image tag in deployment
+        run: |
+          sed -i "s|IMAGE_TAG|${{ github.sha }}|g" k8s/app/deployment.yaml
+
+      - name: Apply manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/postgres/
+          kubectl apply -f k8s/app/
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/booking-agent -n booking-agent --timeout=120s

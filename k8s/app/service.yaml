@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: booking-agent-service
+  namespace: booking-agent
+spec:
+  selector:
+    app: booking-agent
+  ports:
+    - port: 8080
+      targetPort: 8080
